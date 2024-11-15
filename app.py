@@ -1032,7 +1032,7 @@ def main():
                             for mobile_phone in phone_numbers:
                                 # Endpoint for searching contacts
                                 search_endpoint = '/contact/personsearch'
-                                search_url = f"https://app.didar.me/api{search_endpoint}?apikey=uvio38zfgpbbsasyn0f8pl61b4ve6va3"
+                                search_url = f"{base_url}{search_endpoint}?apikey={api_key}"
 
                                 # Search payload
                                 search_payload = {
@@ -1104,7 +1104,7 @@ def main():
 
                                             # Endpoint to save/update the contact
                                             save_endpoint = '/contact/save'
-                                            save_url = f"https://app.didar.me/api{save_endpoint}?ApiKey=uvio38zfgpbbsasyn0f8pl61b4ve6va3"
+                                            save_url = f"{base_url}{save_endpoint}?ApiKey={api_key}"
 
                                             # Save the updated contact
                                             save_response = requests.post(save_url, headers=headers, json=save_payload)
