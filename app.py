@@ -1007,7 +1007,7 @@ def main():
                     if st.button("Execute"):
 
                         # Validate password
-                        if password != st.secrets["change_password "]:
+                        if password != st.secrets["change_password"]:
                             st.error("Invalid password. Please try again.")
                         elif uploaded_file is None:
                             st.error("Please upload a valid Excel file.")
@@ -1813,7 +1813,7 @@ def main():
 
                             # Apply Changes Button
                             if st.button('APPLY CHANGES'):
-                                if password != st.secrets["change_password "]:
+                                if password != st.secrets["change_password"]:
                                     st.error('Incorrect password.')
                                 else:
                                     changed_vip_customers = edited_df[edited_df['VIP Status'] != edited_df['New VIP Status']]
