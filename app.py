@@ -13,7 +13,7 @@ import json
 import re
 
 # Replace with your actual API key
-api_key = st.secrets["api"]["key"]
+api_key = st.secrets["api_key"]
 
 # Base URL for the API
 base_url = 'https://app.didar.me/api'
@@ -1007,7 +1007,7 @@ def main():
                     if st.button("Execute"):
 
                         # Validate password
-                        if password != st.secrets["db"]["password"]:
+                        if password != st.secrets["change_password "]:
                             st.error("Invalid password. Please try again.")
                         elif uploaded_file is None:
                             st.error("Please upload a valid Excel file.")
@@ -1813,7 +1813,7 @@ def main():
 
                             # Apply Changes Button
                             if st.button('APPLY CHANGES'):
-                                if password != st.secrets["db"]["password"]:
+                                if password != st.secrets["change_password "]:
                                     st.error('Incorrect password.')
                                 else:
                                     changed_vip_customers = edited_df[edited_df['VIP Status'] != edited_df['New VIP Status']]
