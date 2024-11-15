@@ -5,7 +5,7 @@ scikit-learn
 plotly
 jdatetime
 openpyxl
-st_aggrid
+streamlit-aggrid==1.0.5
 requests
 json
 re
