@@ -231,19 +231,45 @@ def calculate_rfm(data, today=None):
         'تاریخ انجام معامله': lambda x: (today - pd.to_datetime(x).max()).days,  # Recency
         'کد دیدار معامله': 'count',  # Frequency
         'ارزش معامله': 'sum',  # Monetary
+        'تعداد شب ': 'sum',  # Total Nights
         'VIP Status': 'first'  # VIP Status
     }).reset_index()
 
+
     # Rename columns for clarity
     rfm_data.rename(columns={
-        'کد دیدار شخص معامله': 'Customer ID',
-        'نام شخص معامله': 'First Name',
-        'نام خانوادگی شخص معامله': 'Last Name',
-        'موبایل شخص معامله': 'Phone Number',
-        'تاریخ انجام معامله': 'Recency',
-        'کد دیدار معامله': 'Frequency',
-        'ارزش معامله': 'Monetary',
-    }, inplace=True)
+    'کد دیدار شخص معامله': 'Customer ID',
+    'نام شخص معامله': 'First Name',
+    'نام خانوادگی شخص معامله': 'Last Name',
+    'موبایل شخص معامله': 'Phone Number',
+    'تاریخ انجام معامله': 'Recency',
+    'کد دیدار معامله': 'Frequency',
+    'ارزش معامله': 'Monetary',
+    'تعداد شب ': 'Total Nights',  # Renaming Total Nights
+}, inplace=True)
+
+    # Compute average stay
+    rfm_data['average stay'] = rfm_data['Total Nights'] / rfm_data['Frequency']
+
+    # Compute Is Monthly
+    rfm_data['Is Monthly'] = rfm_data['average stay'] > 15
+    # Get last successful deal per customer
+    last_deals = successful_deals.sort_values('تاریخ انجام معامله').groupby('کد دیدار شخص معامله').tail(1)
+
+    # Merge 'تاریخ ورود' and 'تاریخ خروج' into 'rfm_data'
+    rfm_data = rfm_data.merge(
+        last_deals[['کد دیدار شخص معامله', 'تاریخ ورود', 'تاریخ خروج']],
+        left_on='Customer ID',
+        right_on='کد دیدار شخص معامله',
+        how='left'
+    )
+
+    # Compute 'Is staying'
+    rfm_data['Is staying'] = (today >= rfm_data['تاریخ ورود']) & (today <= rfm_data['تاریخ خروج'])
+
+    # Drop the extra 'کد دیدار شخص معامله' column
+    rfm_data.drop(columns=['کد دیدار شخص معامله'], inplace=True)
+
 
     return rfm_data
 
@@ -393,99 +419,101 @@ def main():
             vip_options = data['VIP Status'].dropna().unique().tolist()
             vip_options.sort()
 
+        
+            
             # ------------------ Navigation ------------------
             st.sidebar.header("Navigation")
             page = st.sidebar.radio("Go to", ['General', 'Compare RFM Segments Over Time', 'Portfolio Analysis', 'Seller Analysis', 'Sale Channel Analysis', 'VIP Analysis','Customer Batch Edit', 'Customer Inquiry Module'])
 
-            # ------------------ Global Filters ------------------
-            st.sidebar.header("Global Filters")
+            # # ------------------ Global Filters ------------------
+            # st.sidebar.header("Global Filters")
 
-            # Multiselect for VIP Status
-            select_all_vips = st.sidebar.checkbox("Select all VIP statuses", value=True, key='select_all_vips_global')
+            # # Multiselect for VIP Status
+            # select_all_vips = st.sidebar.checkbox("Select all VIP statuses", value=True, key='select_all_vips_global')
 
-            if select_all_vips:
-                selected_vips = vip_options
-            else:
-                selected_vips = st.sidebar.multiselect(
-                    "Select VIP Status:",
-                    options=vip_options,
-                    default=[],
-                    key='vips_multiselect_global'
-                )
+            # if select_all_vips:
+            #     selected_vips = vip_options
+            # else:
+            #     selected_vips = st.sidebar.multiselect(
+            #         "Select VIP Status:",
+            #         options=vip_options,
+            #         default=[],
+            #         key='vips_multiselect_global'
+            #     )
 
-            # Multiselect for Products
-            select_all_products_global = st.sidebar.checkbox("Select all products", value=True, key='select_all_products_global')
+            # # Multiselect for Products
+            # select_all_products_global = st.sidebar.checkbox("Select all products", value=True, key='select_all_products_global')
 
-            if select_all_products_global:
-                selected_products_global = product_options
-            else:
-                selected_products_global = st.sidebar.multiselect(
-                    "Select Products (عنوان محصول):",
-                    options=product_options,
-                    default=[],
-                    key='products_multiselect_global'
-                )
+            # if select_all_products_global:
+            #     selected_products_global = product_options
+            # else:
+            #     selected_products_global = st.sidebar.multiselect(
+            #         "Select Products (عنوان محصول):",
+            #         options=product_options,
+            #         default=[],
+            #         key='products_multiselect_global'
+            #     )
 
-            # Multiselect for Sellers
-            select_all_sellers = st.sidebar.checkbox("Select all sellers", value=True, key='select_all_sellers_global')
+            # # Multiselect for Sellers
+            # select_all_sellers = st.sidebar.checkbox("Select all sellers", value=True, key='select_all_sellers_global')
 
-            if select_all_sellers:
-                selected_sellers = sellers_options
-            else:
-                selected_sellers = st.sidebar.multiselect(
-                    "Select Sellers :",
-                    options=sellers_options,
-                    default=[],
-                    key='sellers_multiselect_global'
-                )
+            # if select_all_sellers:
+            #     selected_sellers = sellers_options
+            # else:
+            #     selected_sellers = st.sidebar.multiselect(
+            #         "Select Sellers :",
+            #         options=sellers_options,
+            #         default=[],
+            #         key='sellers_multiselect_global'
+            #     )
 
-            # Multiselect for Sale Channels
-            select_all_sale_channels = st.sidebar.checkbox("Select all sale channels", value=True, key='select_all_sale_channels_global')
+            # # Multiselect for Sale Channels
+            # select_all_sale_channels = st.sidebar.checkbox("Select all sale channels", value=True, key='select_all_sale_channels_global')
 
-            if select_all_sale_channels:
-                selected_sale_channels = sale_channels_options
-            else:
-                selected_sale_channels = st.sidebar.multiselect(
-                    "Select Sale Channels (شیوه آشنایی معامله):",
-                    options=sale_channels_options,
-                    default=[],
-                    key='sale_channels_multiselect_global'
-                )
+            # if select_all_sale_channels:
+            #     selected_sale_channels = sale_channels_options
+            # else:
+            #     selected_sale_channels = st.sidebar.multiselect(
+            #         "Select Sale Channels (شیوه آشنایی معامله):",
+            #         options=sale_channels_options,
+            #         default=[],
+            #         key='sale_channels_multiselect_global'
+            #     )
 
-            # Apply Global Filters
+            # # Apply Global Filters
             filtered_data = data.copy()
 
             # Apply VIP Filter
-            if selected_vips:
-                filtered_data = filtered_data[filtered_data['VIP Status'].isin(selected_vips)]
-            else:
-                st.warning("No VIP statuses selected. Please select at least one VIP status.")
-                filtered_data = pd.DataFrame()
+            # if selected_vips:
+            #     filtered_data = filtered_data[filtered_data['VIP Status'].isin(selected_vips)]
+            # else:
+            #     st.warning("No VIP statuses selected. Please select at least one VIP status.")
+            #     filtered_data = pd.DataFrame()
 
-            # Apply Product Filter
-            if selected_products_global:
-                filtered_data = filtered_data[filtered_data['عنوان محصول'].isin(selected_products_global)]
-            else:
-                st.warning("No products selected. Please select at least one product.")
-                filtered_data = pd.DataFrame()
+            # # Apply Product Filter
+            # if selected_products_global:
+            #     filtered_data = filtered_data[filtered_data['عنوان محصول'].isin(selected_products_global)]
+            # else:
+            #     st.warning("No products selected. Please select at least one product.")
+            #     filtered_data = pd.DataFrame()
 
-            # Apply Seller Filter
-            if selected_sellers:
-                filtered_data = filtered_data[filtered_data['مسئول معامله'].isin(selected_sellers)]
-            else:
-                st.warning("No sellers selected. Please select at least one seller.")
-                filtered_data = pd.DataFrame()
+            # # Apply Seller Filter
+            # if selected_sellers:
+            #     filtered_data = filtered_data[filtered_data['مسئول معامله'].isin(selected_sellers)]
+            # else:
+            #     st.warning("No sellers selected. Please select at least one seller.")
+            #     filtered_data = pd.DataFrame()
 
-            # Apply Sale Channel Filter
-            if selected_sale_channels:
-                filtered_data = filtered_data[filtered_data['شیوه آشنایی معامله'].isin(selected_sale_channels)]
-            else:
-                st.warning("No sale channels selected. Please select at least one sale channel.")
-                filtered_data = pd.DataFrame()
+            # # Apply Sale Channel Filter
+            # if selected_sale_channels:
+            #     filtered_data = filtered_data[filtered_data['شیوه آشنایی معامله'].isin(selected_sale_channels)]
+            # else:
+            #     st.warning("No sale channels selected. Please select at least one sale channel.")
+            #     filtered_data = pd.DataFrame()
 
-            if filtered_data.empty:
-                st.error("No data available after applying the global filters.")
-                st.stop()
+            # if filtered_data.empty:
+            #     st.error("No data available after applying the global filters.")
+            #     st.stop()
 
             # Cache the filtered data
             @st.cache_data
@@ -503,6 +531,12 @@ def main():
             rfm_data = rfm_segmentation(rfm_data)
             rfm_data = normalize_rfm(rfm_data)
             data_load_state.text('Loading and processing data...done!')
+
+            stay_options = rfm_data['Is Monthly'].dropna().unique().tolist()
+            stay_options.sort()
+
+            current_status_options=rfm_data['Is staying'].dropna().unique().tolist()
+            current_status_options.sort()
 
             # Define colors for segments (used globally)
             COLOR_MAP = {
@@ -651,7 +685,20 @@ def main():
 
                 st.subheader("Customer Segmentation Data")
 
-                # Product Filter for Data Table
+                @st.cache_data
+                def get_filter_options(data, rfm_data):
+                    product_options = sorted(data['عنوان محصول'].dropna().unique().tolist())
+                    stay_options = sorted(rfm_data['Is Monthly'].dropna().unique().tolist())
+                    current_status_options = sorted(rfm_data['Is staying'].dropna().unique().tolist())
+                    return product_options, stay_options, current_status_options
+
+                product_options, stay_options, current_status_options = get_filter_options(data, rfm_data)
+
+                # Initialize the filtered DataFrame with the full RFM data
+                rfm_data_filtered_table = rfm_data_filtered_global.copy()
+
+                # ------------------ Product Filter ------------------
+
                 st.subheader("Filter Table by Products")
                 select_all_products_table = st.checkbox("Select all products", value=True, key='select_all_products_table')
 
@@ -669,11 +716,51 @@ def main():
                     # Get customer IDs who have purchased the selected products
                     customers_with_selected_products = data[data['عنوان محصول'].isin(selected_products_table)]['کد دیدار شخص معامله'].unique()
                     # Filter RFM data
-                    rfm_data_filtered_table = rfm_data_filtered_global[rfm_data_filtered_global['Customer ID'].isin(customers_with_selected_products)]
+                    rfm_data_filtered_table = rfm_data_filtered_table[rfm_data_filtered_table['Customer ID'].isin(customers_with_selected_products)]
                 else:
-                    rfm_data_filtered_table = rfm_data_filtered_global.copy()
+                    st.warning("No products selected. Displaying all products.")
 
-                st.write(rfm_data_filtered_table[['Customer ID', 'First Name', 'Last Name', 'VIP Status', 'Phone Number', 'Recency', 'Frequency', 'Monetary', 'RFM_segment_label']])
+                # ------------------ Staying Type Filter ------------------
+
+                select_all_staying_table = st.checkbox("Select all guest types (Monthly or not)", value=True, key='select_all_staying_table')
+
+                if select_all_staying_table:
+                    selected_staying_table = stay_options
+                else:
+                    selected_staying_table = st.multiselect(
+                        "Select guest type (monthly or not):",
+                        options=stay_options,
+                        default=[],
+                        key='guest_type_multiselect_table'
+                    )
+
+                if selected_staying_table:
+                    # Filter RFM data
+                    rfm_data_filtered_table = rfm_data_filtered_table[rfm_data_filtered_table['Is Monthly'].isin(selected_staying_table)]
+                else:
+                    st.warning("No guest types selected. Displaying all guest types.")
+
+                # ------------------ Current Status Filter ------------------
+
+                select_all_current_status_table = st.checkbox("Select all current status (currently staying or not)", value=True, key='select_all_current_status_table')
+
+                if select_all_current_status_table:
+                    selected_current_status_table = current_status_options
+                else:
+                    selected_current_status_table = st.multiselect(
+                        "Select current status (currently staying or not):",
+                        options=current_status_options,
+                        default=[],
+                        key='current_status_multiselect_table'
+                    )
+
+                if selected_current_status_table:
+                    # Filter RFM data
+                    rfm_data_filtered_table = rfm_data_filtered_table[rfm_data_filtered_table['Is staying'].isin(selected_current_status_table)]
+                else:
+                    st.warning("No current status selected. Displaying all statuses.")
+
+                st.write(rfm_data_filtered_table[['Customer ID', 'First Name', 'Last Name', 'VIP Status', 'Phone Number', 'Recency', 'Frequency', 'Monetary','average stay','Is Monthly','Is staying', 'RFM_segment_label']])
 
                 # Optionally, allow users to download the data
                 csv_data = convert_df(rfm_data_filtered_table)
@@ -754,7 +841,7 @@ def main():
                         # Prepare data for comparison
                         # Merge RFM1 and RFM2 on 'Customer ID'
                         comparison_df = rfm_data1[['Customer ID', 'First Name', 'Last Name', 'Phone Number', 'VIP Status', 'RFM_segment_label']].merge(
-                            rfm_data_filtered[['Customer ID', 'RFM_segment_label']],
+                            rfm_data_filtered[['Customer ID','average stay','Is Monthly','Is staying', 'RFM_segment_label']],
                             on='Customer ID',
                             how='inner',
                             suffixes=('_RFM1', '_RFM2')
@@ -809,7 +896,7 @@ def main():
 
                                 # Show customer table
                                 st.subheader("Customer Details")
-                                customer_table = comparison_df[['Customer ID', 'First Name', 'Last Name', 'Phone Number', 'VIP Status', 'RFM_segment_label_RFM1', 'RFM_segment_label_RFM2']]
+                                customer_table = comparison_df[['Customer ID', 'First Name', 'Last Name', 'Phone Number', 'VIP Status','average stay','Is Monthly','Is staying', 'RFM_segment_label_RFM1', 'RFM_segment_label_RFM2']]
                                 customer_table.rename(columns={
                                     'RFM_segment_label_RFM1': 'Before Segment',
                                     'RFM_segment_label_RFM2': 'After Segment'
@@ -911,11 +998,11 @@ def main():
                                 deals_filtered = deals_filtered[deals_filtered['عنوان محصول'].isin(selected_products_portfolio)]
 
                                 # Apply global filters
-                                deals_filtered = deals_filtered[
-                                    (deals_filtered['عنوان محصول'].isin(selected_products_global)) &
-                                    (deals_filtered['مسئول معامله'].isin(selected_sellers)) &
-                                    (deals_filtered['شیوه آشنایی معامله'].isin(selected_sale_channels))
-                                ]
+                                # deals_filtered = deals_filtered[
+                                #     (deals_filtered['عنوان محصول'].isin(selected_products_global)) &
+                                #     (deals_filtered['مسئول معامله'].isin(selected_sellers)) &
+                                #     (deals_filtered['شیوه آشنایی معامله'].isin(selected_sale_channels))
+                                # ]
 
                                 if deals_filtered.empty:
                                     st.warning("No deals found for the selected clusters, VIP statuses, and products.")
@@ -964,7 +1051,7 @@ def main():
                                     customer_nights = successful_deals.groupby(['کد دیدار شخص معامله', 'عنوان محصول'])['تعداد شب '].sum().unstack(fill_value=0)
 
                                     # Merge with RFM data
-                                    customer_details = rfm_data[rfm_data['Customer ID'].isin(customers_in_clusters)][['Customer ID', 'First Name', 'Last Name', 'VIP Status', 'RFM_segment_label', 'Recency', 'Frequency', 'Monetary']]
+                                    customer_details = rfm_data[rfm_data['Customer ID'].isin(customers_in_clusters)][['Customer ID', 'First Name', 'Last Name', 'VIP Status','average stay','Is Monthly','Is staying', 'RFM_segment_label', 'Recency', 'Frequency', 'Monetary']]
                                     customer_details = customer_details.merge(customer_nights, left_on='Customer ID', right_index=True, how='inner').fillna(0)
 
                                     st.write(customer_details)
@@ -1032,7 +1119,7 @@ def main():
                             for mobile_phone in phone_numbers:
                                 # Endpoint for searching contacts
                                 search_endpoint = '/contact/personsearch'
-                                search_url = f"{base_url}{search_endpoint}?apikey={api_key}"
+                                search_url = f"https://app.didar.me/api{search_endpoint}?apikey=uvio38zfgpbbsasyn0f8pl61b4ve6va3"
 
                                 # Search payload
                                 search_payload = {
@@ -1104,7 +1191,7 @@ def main():
 
                                             # Endpoint to save/update the contact
                                             save_endpoint = '/contact/save'
-                                            save_url = f"{base_url}{save_endpoint}?ApiKey={api_key}"
+                                            save_url = f"https://app.didar.me/api{save_endpoint}?ApiKey=uvio38zfgpbbsasyn0f8pl61b4ve6va3"
 
                                             # Save the updated contact
                                             save_response = requests.post(save_url, headers=headers, json=save_payload)
@@ -1181,12 +1268,12 @@ def main():
                                 ]
 
                                 # Apply global filters
-                                date_filtered_data = date_filtered_data[
-                                    (date_filtered_data['عنوان محصول'].isin(selected_products_global)) &
-                                    (date_filtered_data['مسئول معامله'].isin(selected_sellers)) &
-                                    (date_filtered_data['شیوه آشنایی معامله'].isin(selected_sale_channels)) &
-                                    (date_filtered_data['VIP Status'].isin(selected_vips_seller))
-                                ]
+                                # date_filtered_data = date_filtered_data[
+                                #     (date_filtered_data['عنوان محصول'].isin(selected_products_global)) &
+                                #     (date_filtered_data['مسئول معامله'].isin(selected_sellers)) &
+                                #     (date_filtered_data['شیوه آشنایی معامله'].isin(selected_sale_channels)) &
+                                #     (date_filtered_data['VIP Status'].isin(selected_vips_seller))
+                                # ]
 
                                 seller_data = date_filtered_data[date_filtered_data['مسئول معامله'] == selected_seller]
                                 if seller_data.empty:
@@ -1241,7 +1328,7 @@ def main():
                                         customer_nights.rename(columns={'کد دیدار شخص معامله': 'Customer ID', 'تعداد شب ': 'Total Nights'}, inplace=True)
 
                                         # Merge with RFM data
-                                        customer_details = seller_rfm_data[['Customer ID', 'First Name','Phone Number','Last Name', 'VIP Status', 'RFM_segment_label', 'Recency', 'Frequency', 'Monetary']]
+                                        customer_details = seller_rfm_data[['Customer ID', 'First Name','Phone Number','Last Name', 'VIP Status', 'Recency', 'Frequency', 'Monetary','average stay','Is Monthly','Is staying', 'RFM_segment_label']]
                                         customer_details = customer_details.merge(customer_nights, on='Customer ID', how='left').fillna(0)
 
                                         st.write(customer_details)
@@ -1316,12 +1403,12 @@ def main():
                                 ]
 
                                 # Apply global filters
-                                date_filtered_data = date_filtered_data[
-                                    (date_filtered_data['عنوان محصول'].isin(selected_products_global)) &
-                                    (date_filtered_data['مسئول معامله'].isin(selected_sellers)) &
-                                    (date_filtered_data['شیوه آشنایی معامله'].isin(selected_sale_channels)) &
-                                    (date_filtered_data['VIP Status'].isin(selected_vips_seller))
-                                ]
+                                # date_filtered_data = date_filtered_data[
+                                #     (date_filtered_data['عنوان محصول'].isin(selected_products_global)) &
+                                #     (date_filtered_data['مسئول معامله'].isin(selected_sellers)) &
+                                #     (date_filtered_data['شیوه آشنایی معامله'].isin(selected_sale_channels)) &
+                                #     (date_filtered_data['VIP Status'].isin(selected_vips_seller))
+                                # ]
 
                                 cluster_customers = rfm_data[rfm_data['RFM_segment_label'].isin(selected_clusters_seller)]['Customer ID'].unique()
                                 cluster_deals = date_filtered_data[date_filtered_data['کد دیدار شخص معامله'].isin(cluster_customers)]
@@ -1447,12 +1534,12 @@ def main():
                                 ]
 
                                 # Apply global filters
-                                date_filtered_data = date_filtered_data[
-                                    (date_filtered_data['عنوان محصول'].isin(selected_products_global)) &
-                                    (date_filtered_data['مسئول معامله'].isin(selected_sellers)) &
-                                    (date_filtered_data['شیوه آشنایی معامله'].isin(selected_sale_channels)) &
-                                    (date_filtered_data['VIP Status'].isin(selected_vips_channel))
-                                ]
+                                # date_filtered_data = date_filtered_data[
+                                #     (date_filtered_data['عنوان محصول'].isin(selected_products_global)) &
+                                #     (date_filtered_data['مسئول معامله'].isin(selected_sellers)) &
+                                #     (date_filtered_data['شیوه آشنایی معامله'].isin(selected_sale_channels)) &
+                                #     (date_filtered_data['VIP Status'].isin(selected_vips_channel))
+                                # ]
 
                                 channel_data = date_filtered_data[date_filtered_data['شیوه آشنایی معامله'] == selected_sale_channel]
                                 if channel_data.empty:
@@ -1507,7 +1594,7 @@ def main():
                                         customer_nights.rename(columns={'کد دیدار شخص معامله': 'Customer ID', 'تعداد شب ': 'Total Nights'}, inplace=True)
 
                                         # Merge with RFM data
-                                        customer_details = channel_rfm_data[['Customer ID', 'First Name', 'Last Name','Phone Number', 'VIP Status', 'RFM_segment_label', 'Recency', 'Frequency', 'Monetary']]
+                                        customer_details = channel_rfm_data[['Customer ID', 'First Name', 'Last Name','Phone Number', 'VIP Status', 'RFM_segment_label','average stay','Is Monthly','Is staying','Recency', 'Frequency', 'Monetary']]
                                         customer_details = customer_details.merge(customer_nights, on='Customer ID', how='left').fillna(0)
 
                                         st.write(customer_details)
@@ -1582,12 +1669,12 @@ def main():
                                 ]
 
                                 # Apply global filters
-                                date_filtered_data = date_filtered_data[
-                                    (date_filtered_data['عنوان محصول'].isin(selected_products_global)) &
-                                    (date_filtered_data['مسئول معامله'].isin(selected_sellers)) &
-                                    (date_filtered_data['شیوه آشنایی معامله'].isin(selected_sale_channels)) &
-                                    (date_filtered_data['VIP Status'].isin(selected_vips_channel))
-                                ]
+                                # date_filtered_data = date_filtered_data[
+                                #     (date_filtered_data['عنوان محصول'].isin(selected_products_global)) &
+                                #     (date_filtered_data['مسئول معامله'].isin(selected_sellers)) &
+                                #     (date_filtered_data['شیوه آشنایی معامله'].isin(selected_sale_channels)) &
+                                #     (date_filtered_data['VIP Status'].isin(selected_vips_channel))
+                                # ]
 
                                 cluster_customers = rfm_data[rfm_data['RFM_segment_label'].isin(selected_clusters_channel)]['Customer ID'].unique()
                                 cluster_deals = date_filtered_data[date_filtered_data['کد دیدار شخص معامله'].isin(cluster_customers)]
