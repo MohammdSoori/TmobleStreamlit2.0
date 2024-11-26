@@ -209,6 +209,7 @@ def update_contact_last_name(phone_number, updated_last_name):
         return False
 
 # Function to calculate RFM
+
 @st.cache_data
 def calculate_rfm(data, today=None):
     # Divide 'ارزش معامله' by 10 as per the new requirement
@@ -235,24 +236,24 @@ def calculate_rfm(data, today=None):
         'VIP Status': 'first'  # VIP Status
     }).reset_index()
 
-
     # Rename columns for clarity
     rfm_data.rename(columns={
-    'کد دیدار شخص معامله': 'Customer ID',
-    'نام شخص معامله': 'First Name',
-    'نام خانوادگی شخص معامله': 'Last Name',
-    'موبایل شخص معامله': 'Phone Number',
-    'تاریخ انجام معامله': 'Recency',
-    'کد دیدار معامله': 'Frequency',
-    'ارزش معامله': 'Monetary',
-    'تعداد شب ': 'Total Nights',  # Renaming Total Nights
-}, inplace=True)
+        'کد دیدار شخص معامله': 'Customer ID',
+        'نام شخص معامله': 'First Name',
+        'نام خانوادگی شخص معامله': 'Last Name',
+        'موبایل شخص معامله': 'Phone Number',
+        'تاریخ انجام معامله': 'Recency',
+        'کد دیدار معامله': 'Frequency',
+        'ارزش معامله': 'Monetary',
+        'تعداد شب ': 'Total Nights',
+    }, inplace=True)
 
     # Compute average stay
     rfm_data['average stay'] = rfm_data['Total Nights'] / rfm_data['Frequency']
 
     # Compute Is Monthly
     rfm_data['Is Monthly'] = rfm_data['average stay'] > 15
+
     # Get last successful deal per customer
     last_deals = successful_deals.sort_values('تاریخ انجام معامله').groupby('کد دیدار شخص معامله').tail(1)
 
@@ -270,6 +271,27 @@ def calculate_rfm(data, today=None):
     # Drop the extra 'کد دیدار شخص معامله' column
     rfm_data.drop(columns=['کد دیدار شخص معامله'], inplace=True)
 
+    # -------------------- New Code to Add Favorite Product and Last Product --------------------
+
+    # Favorite Product: Product with the most successful deals per customer
+    favorite_product = successful_deals[successful_deals['عنوان محصول'].notna()]
+    favorite_product = favorite_product.groupby(['کد دیدار شخص معامله', 'عنوان محصول']).size().reset_index(name='DealCount')
+    favorite_product = favorite_product.sort_values(['کد دیدار شخص معامله', 'DealCount'], ascending=[True, False])
+    favorite_product = favorite_product.groupby('کد دیدار شخص معامله').first().reset_index()
+    favorite_product = favorite_product[['کد دیدار شخص معامله', 'عنوان محصول']].rename(columns={'عنوان محصول': 'Favorite Product'})
+
+    # Last Product: Product from the customer's last successful deal
+    last_product = successful_deals.sort_values('تاریخ انجام معامله').groupby('کد دیدار شخص معامله').tail(1)
+    last_product = last_product[['کد دیدار شخص معامله', 'عنوان محصول']].rename(columns={'عنوان محصول': 'Last Product'})
+
+    # Merge Favorite Product and Last Product into rfm_data
+    rfm_data = rfm_data.merge(favorite_product, left_on='Customer ID', right_on='کد دیدار شخص معامله', how='left')
+    rfm_data = rfm_data.merge(last_product, left_on='Customer ID', right_on='کد دیدار شخص معامله', how='left')
+
+    # Drop the extra 'کد دیدار شخص معامله' columns
+    rfm_data.drop(columns=['کد دیدار شخص معامله_x', 'کد دیدار شخص معامله_y'], inplace=True)
+
+    # -------------------------------------------------------------------------------------------
 
     return rfm_data
 
@@ -760,7 +782,7 @@ def main():
                 else:
                     st.warning("No current status selected. Displaying all statuses.")
 
-                st.write(rfm_data_filtered_table[['Customer ID', 'First Name', 'Last Name', 'VIP Status', 'Phone Number', 'Recency', 'Frequency', 'Monetary','average stay','Is Monthly','Is staying', 'RFM_segment_label']])
+                st.write(rfm_data_filtered_table[['Customer ID', 'First Name', 'Last Name', 'VIP Status', 'Phone Number', 'Recency', 'Frequency', 'Monetary','average stay','Is Monthly','Is staying','Favorite Product','Last Product', 'RFM_segment_label']])
 
                 # Optionally, allow users to download the data
                 csv_data = convert_df(rfm_data_filtered_table)
