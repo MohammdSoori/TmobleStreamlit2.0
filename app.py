@@ -69,14 +69,14 @@ def load_data(uploaded_file):
         else:
             st.warning(f"Column '{col}' not found in the data.")
 
-    # Clean 'تعداد شب ' column by removing non-digit characters
-    if 'تعداد شب ' in data.columns:
-        data['تعداد شب '] = data['تعداد شب '].astype(str).str.replace(r'\D', '', regex=True)
-        data['تعداد شب '] = pd.to_numeric(data['تعداد شب '], errors='coerce')
-        # Remove entries where 'تعداد شب ' is unreasonably large (e.g., greater than 365)
-        data.loc[data['تعداد شب '] > 365, 'تعداد شب '] = np.nan
+    # Clean 'تعداد شب' column by removing non-digit characters
+    if 'تعداد شب' in data.columns:
+        data['تعداد شب'] = data['تعداد شب'].astype(str).str.replace(r'[^\d.]', '', regex=True)  # Keep digits and decimal points
+        data['تعداد شب'] = pd.to_numeric(data['تعداد شب'], errors='coerce')
+        # Remove entries where 'تعداد شب' is unreasonably large (e.g., greater than 365)
+        data.loc[data['تعداد شب'] > 700, 'تعداد شب'] = np.nan
     else:
-        st.warning("Column 'تعداد شب ' not found in the data.")
+        st.warning("Column 'تعداد شب' not found in the data.")
 
     # Similarly, convert 'ارزش معامله' to numeric
     if 'ارزش معامله' in data.columns:
@@ -232,7 +232,7 @@ def calculate_rfm(data, today=None):
         'تاریخ انجام معامله': lambda x: (today - pd.to_datetime(x).max()).days,  # Recency
         'کد دیدار معامله': 'count',  # Frequency
         'ارزش معامله': 'sum',  # Monetary
-        'تعداد شب ': 'sum',  # Total Nights
+        'تعداد شب': 'sum',  # Total Nights
         'VIP Status': 'first'  # VIP Status
     }).reset_index()
 
@@ -245,7 +245,7 @@ def calculate_rfm(data, today=None):
         'تاریخ انجام معامله': 'Recency',
         'کد دیدار معامله': 'Frequency',
         'ارزش معامله': 'Monetary',
-        'تعداد شب ': 'Total Nights',
+        'تعداد شب': 'Total Nights',
     }, inplace=True)
 
     # Compute average stay
@@ -1069,8 +1069,8 @@ def main():
                                     # Get successful deals
                                     successful_deals = deals_filtered[deals_filtered['وضعیت معامله'] == 'موفق']
 
-                                    # Sum of 'تعداد شب ' per customer per product
-                                    customer_nights = successful_deals.groupby(['کد دیدار شخص معامله', 'عنوان محصول'])['تعداد شب '].sum().unstack(fill_value=0)
+                                    # Sum of 'تعداد شب' per customer per product
+                                    customer_nights = successful_deals.groupby(['کد دیدار شخص معامله', 'عنوان محصول'])['تعداد شب'].sum().unstack(fill_value=0)
 
                                     # Merge with RFM data
                                     customer_details = rfm_data[rfm_data['Customer ID'].isin(customers_in_clusters)][['Customer ID', 'First Name', 'Last Name', 'VIP Status','average stay','Is Monthly','Is staying', 'RFM_segment_label', 'Recency', 'Frequency', 'Monetary']]
@@ -1345,9 +1345,9 @@ def main():
 
                                         st.subheader("Customer Details")
 
-                                        # Sum of 'تعداد شب ' per customer
-                                        customer_nights = seller_data.groupby('کد دیدار شخص معامله')['تعداد شب '].sum().reset_index()
-                                        customer_nights.rename(columns={'کد دیدار شخص معامله': 'Customer ID', 'تعداد شب ': 'Total Nights'}, inplace=True)
+                                        # Sum of 'تعداد شب' per customer
+                                        customer_nights = seller_data.groupby('کد دیدار شخص معامله')['تعداد شب'].sum().reset_index()
+                                        customer_nights.rename(columns={'کد دیدار شخص معامله': 'Customer ID', 'تعداد شب': 'Total Nights'}, inplace=True)
 
                                         # Merge with RFM data
                                         customer_details = seller_rfm_data[['Customer ID', 'First Name','Phone Number','Last Name', 'VIP Status', 'Recency', 'Frequency', 'Monetary','average stay','Is Monthly','Is staying', 'RFM_segment_label']]
@@ -1475,7 +1475,7 @@ def main():
                                     # Merge with RFM data to get customer details
                                     cluster_deals = cluster_deals.merge(rfm_data[['Customer ID','Phone Number', 'RFM_segment_label']], left_on='کد دیدار شخص معامله', right_on='Customer ID', how='left')
 
-                                    deals_table = cluster_deals[['Customer ID', 'نام شخص معامله', 'نام خانوادگی شخص معامله','Phone Number', 'VIP Status', 'RFM_segment_label', 'مسئول معامله', 'تعداد شب ', 'ارزش معامله', 'تاریخ انجام معامله']]
+                                    deals_table = cluster_deals[['Customer ID', 'نام شخص معامله', 'نام خانوادگی شخص معامله','Phone Number', 'VIP Status', 'RFM_segment_label', 'مسئول معامله', 'تعداد شب', 'ارزش معامله', 'تاریخ انجام معامله']]
 
                                     st.write(deals_table)
 
@@ -1611,9 +1611,9 @@ def main():
 
                                         st.subheader("Customer Details")
 
-                                        # Sum of 'تعداد شب ' per customer
-                                        customer_nights = channel_data.groupby('کد دیدار شخص معامله')['تعداد شب '].sum().reset_index()
-                                        customer_nights.rename(columns={'کد دیدار شخص معامله': 'Customer ID', 'تعداد شب ': 'Total Nights'}, inplace=True)
+                                        # Sum of 'تعداد شب' per customer
+                                        customer_nights = channel_data.groupby('کد دیدار شخص معامله')['تعداد شب'].sum().reset_index()
+                                        customer_nights.rename(columns={'کد دیدار شخص معامله': 'Customer ID', 'تعداد شب': 'Total Nights'}, inplace=True)
 
                                         # Merge with RFM data
                                         customer_details = channel_rfm_data[['Customer ID', 'First Name', 'Last Name','Phone Number', 'VIP Status', 'RFM_segment_label','average stay','Is Monthly','Is staying','Recency', 'Frequency', 'Monetary']]
@@ -1741,7 +1741,7 @@ def main():
                                     # Merge with RFM data to get customer details
                                     cluster_deals = cluster_deals.merge(rfm_data[['Customer ID', 'RFM_segment_label']], left_on='کد دیدار شخص معامله', right_on='Customer ID', how='left')
 
-                                    deals_table = cluster_deals[['Customer ID', 'نام شخص معامله', 'نام خانوادگی شخص معامله', 'VIP Status', 'RFM_segment_label', 'شیوه آشنایی معامله', 'تعداد شب ', 'ارزش معامله', 'تاریخ انجام معامله']]
+                                    deals_table = cluster_deals[['Customer ID', 'نام شخص معامله', 'نام خانوادگی شخص معامله', 'VIP Status', 'RFM_segment_label', 'شیوه آشنایی معامله', 'تعداد شب', 'ارزش معامله', 'تاریخ انجام معامله']]
 
                                     st.write(deals_table)
 
