@@ -13,10 +13,10 @@ import json
 import re
 
 # Replace with your actual API key
-api_key = 'uvio38zfgpbbsasyn0f8pl61b4ve6va3'
+api_key = st.secrets["api_key"]
 
 # Base URL for the API
-base_url = st.secrets["api_key"]
+base_url = 'https://app.didar.me/api'
 
 # Function to convert Jalali dates to Gregorian
 @st.cache_data
