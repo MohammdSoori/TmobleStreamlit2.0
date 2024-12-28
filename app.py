@@ -31,7 +31,7 @@ def jalali_to_gregorian_vectorized(date_series):
             return pd.NaT
     return date_series.apply(convert)
 
-# Function to extract VIP status based on emojis
+# Function to ext                                                                                                                                                                                                                                                                                                       ract VIP status based on emojis
 @st.cache_data
 def extract_vip_status(name_series):
     def get_vip_status(name):
@@ -46,6 +46,27 @@ def extract_vip_status(name_series):
         else:
             return 'Non-VIP'
     return name_series.apply(get_vip_status)
+
+
+#############################
+
+@st.cache_data
+def extract_blacklist_status(name_series):
+    def get_blacklist_status(name):
+        if pd.isna(name):
+            return 'Non-BlackList'
+        # بررسی وجود (*) در انتهای نام
+        if re.search(r'\(\*\)\s*$', name):
+            return 'BlackList'
+        else:
+            return 'Non-BlackList'
+    return name_series.apply(get_blacklist_status)
+
+
+
+#############################
+
+
 
 # Function to load and preprocess data
 @st.cache_data
@@ -86,6 +107,45 @@ def load_data(uploaded_file):
 
     # Extract VIP Status
     data['VIP Status'] = extract_vip_status(data['نام خانوادگی شخص معامله'])
+
+
+#############################################
+
+    # تبدیل ستون 'عنوان محصول' به رشته و پر کردن مقادیر نامعتبر
+    data['عنوان محصول'] = data['عنوان محصول'].fillna('').astype(str)
+
+    def extract_complex(row):
+        if re.search(r'\bمیرداماد\b', row):
+            return 'میرداماد'
+        elif re.search(r'\bپارک وی\b', row):
+            return 'پارک وی'
+        elif re.search(r'\bولنجک\b', row):
+            return 'ولنجک'
+        elif re.search(r'\bبهشتی\b', row):
+            return 'بهشتی'
+        elif re.search(r'\bجردن\b', row):
+            return 'جردن'
+        elif re.search(r'\bمرزداران\b', row):
+            return 'مرزداران'
+        elif re.search(r'\bاقدسیه\b', row):
+            return 'اقدسیه'
+        elif re.search(r'\bجمهوری\b', row):
+            return 'جمهوری'
+        elif re.search(r'\bکشاورز\b', row):
+            return 'کشاورز'
+        else:
+            return 'نامشخص'
+
+    # اضافه کردن ستون جدید برای مجتمع
+    data['Complex'] = data['عنوان محصول'].apply(extract_complex)
+
+
+    data['BlackList Status'] = extract_blacklist_status(data['نام خانوادگی شخص معامله'])
+
+
+
+
+#########################################
 
     return data
 
@@ -447,95 +507,8 @@ def main():
             st.sidebar.header("Navigation")
             page = st.sidebar.radio("Go to", ['General', 'Compare RFM Segments Over Time', 'Portfolio Analysis', 'Seller Analysis', 'Sale Channel Analysis', 'VIP Analysis','Customer Batch Edit', 'Customer Inquiry Module'])
 
-            # # ------------------ Global Filters ------------------
-            # st.sidebar.header("Global Filters")
-
-            # # Multiselect for VIP Status
-            # select_all_vips = st.sidebar.checkbox("Select all VIP statuses", value=True, key='select_all_vips_global')
-
-            # if select_all_vips:
-            #     selected_vips = vip_options
-            # else:
-            #     selected_vips = st.sidebar.multiselect(
-            #         "Select VIP Status:",
-            #         options=vip_options,
-            #         default=[],
-            #         key='vips_multiselect_global'
-            #     )
-
-            # # Multiselect for Products
-            # select_all_products_global = st.sidebar.checkbox("Select all products", value=True, key='select_all_products_global')
-
-            # if select_all_products_global:
-            #     selected_products_global = product_options
-            # else:
-            #     selected_products_global = st.sidebar.multiselect(
-            #         "Select Products (عنوان محصول):",
-            #         options=product_options,
-            #         default=[],
-            #         key='products_multiselect_global'
-            #     )
-
-            # # Multiselect for Sellers
-            # select_all_sellers = st.sidebar.checkbox("Select all sellers", value=True, key='select_all_sellers_global')
-
-            # if select_all_sellers:
-            #     selected_sellers = sellers_options
-            # else:
-            #     selected_sellers = st.sidebar.multiselect(
-            #         "Select Sellers :",
-            #         options=sellers_options,
-            #         default=[],
-            #         key='sellers_multiselect_global'
-            #     )
-
-            # # Multiselect for Sale Channels
-            # select_all_sale_channels = st.sidebar.checkbox("Select all sale channels", value=True, key='select_all_sale_channels_global')
-
-            # if select_all_sale_channels:
-            #     selected_sale_channels = sale_channels_options
-            # else:
-            #     selected_sale_channels = st.sidebar.multiselect(
-            #         "Select Sale Channels (شیوه آشنایی معامله):",
-            #         options=sale_channels_options,
-            #         default=[],
-            #         key='sale_channels_multiselect_global'
-            #     )
-
-            # # Apply Global Filters
             filtered_data = data.copy()
 
-            # Apply VIP Filter
-            # if selected_vips:
-            #     filtered_data = filtered_data[filtered_data['VIP Status'].isin(selected_vips)]
-            # else:
-            #     st.warning("No VIP statuses selected. Please select at least one VIP status.")
-            #     filtered_data = pd.DataFrame()
-
-            # # Apply Product Filter
-            # if selected_products_global:
-            #     filtered_data = filtered_data[filtered_data['عنوان محصول'].isin(selected_products_global)]
-            # else:
-            #     st.warning("No products selected. Please select at least one product.")
-            #     filtered_data = pd.DataFrame()
-
-            # # Apply Seller Filter
-            # if selected_sellers:
-            #     filtered_data = filtered_data[filtered_data['مسئول معامله'].isin(selected_sellers)]
-            # else:
-            #     st.warning("No sellers selected. Please select at least one seller.")
-            #     filtered_data = pd.DataFrame()
-
-            # # Apply Sale Channel Filter
-            # if selected_sale_channels:
-            #     filtered_data = filtered_data[filtered_data['شیوه آشنایی معامله'].isin(selected_sale_channels)]
-            # else:
-            #     st.warning("No sale channels selected. Please select at least one sale channel.")
-            #     filtered_data = pd.DataFrame()
-
-            # if filtered_data.empty:
-            #     st.error("No data available after applying the global filters.")
-            #     st.stop()
 
             # Cache the filtered data
             @st.cache_data
@@ -581,12 +554,16 @@ def main():
 
             # ------------------ Pages ------------------
 
+
+###
+
             if page == 'General':
-                # ------------------ Segment Filters for RFM Plots ------------------
 
-                st.subheader("Filter RFM Plots by Segments")
 
-                # VIP Filter for this page
+                # Filter data initially as an empty DataFrame
+                rfm_data_filtered_plots = pd.DataFrame()
+
+                # VIP Filter
                 vip_options_page = sorted(rfm_data_filtered_global['VIP Status'].unique())
                 select_all_vips_page = st.checkbox("Select all VIP statuses", value=True, key='select_all_vips_plots')
 
@@ -596,11 +573,56 @@ def main():
                     selected_vips_plots = st.multiselect(
                         "Select VIP Status:",
                         options=vip_options_page,
-                        default=[],
+                        default=[],  # default should be empty if no options are selected
                         key='vips_multiselect_plots'
                     )
+
+                if not select_all_vips_page and not selected_vips_plots:
+                    # If no VIP is selected, select all by default
+                    selected_vips_plots = vip_options_page
+
                 rfm_data_filtered_global = rfm_data_filtered_global[rfm_data_filtered_global['VIP Status'].isin(selected_vips_plots)]
 
+
+
+                ####################
+                #بلک لیست
+                # اطمینان از مقداردهی ستون BlackList Status
+                if 'BlackList Status' not in data.columns:
+                    data['BlackList Status'] = extract_blacklist_status(data['نام خانوادگی شخص معامله'])
+
+                # کپی اولیه داده‌ها
+                filtered_data = data.copy()
+
+                # فیلتر Black List
+                blacklist_options_page = sorted(filtered_data['BlackList Status'].unique())
+                select_all_blacklist_page = st.checkbox("Select all Black List statuses", value=True, key='select_all_blacklist_portfolio')
+
+                if select_all_blacklist_page:
+                    selected_blacklist_page = blacklist_options_page
+                else:
+                    selected_blacklist_page = st.multiselect(
+                        "Select Black List Status:",
+                        options=blacklist_options_page,
+                        default=[],
+                        key='blacklist_multiselect_portfolio'
+                    )
+
+                if not select_all_blacklist_page and not selected_blacklist_page:
+                    # اگر تیک برداشته شد و لیستی انتخاب نشد، همه را به طور پیش‌فرض انتخاب کن
+                    selected_blacklist_page = blacklist_options_page
+
+
+                # اعمال فیلتر Black List
+                filtered_data = filtered_data[filtered_data['BlackList Status'].isin(selected_blacklist_page)]
+
+                # Update rfm_data_filtered_global based on blacklist filter
+                rfm_data_filtered_global = rfm_data_filtered_global[rfm_data_filtered_global['Customer ID'].isin(filtered_data['کد دیدار شخص معامله'])]
+
+                
+
+
+                # Segment Filter
                 segment_options = sorted(rfm_data_filtered_global['RFM_segment_label'].unique())
                 select_all_segments = st.checkbox("Select all segments", value=True, key='select_all_segments_plots')
 
@@ -610,201 +632,223 @@ def main():
                     selected_segments_plots = st.multiselect(
                         "Select RFM Segments:",
                         options=segment_options,
-                        default=[],
+                        default=[],  # default should be empty if no options are selected
                         key='segments_multiselect_plots'
                     )
 
+                if not select_all_segments and not selected_segments_plots:
+                    # If no segment is selected, select all by default
+                    selected_segments_plots = segment_options
+
+                # Apply filters
                 if selected_segments_plots:
                     rfm_data_filtered_plots = rfm_data_filtered_global[rfm_data_filtered_global['RFM_segment_label'].isin(selected_segments_plots)]
                 else:
                     st.warning("No segments selected. Please select at least one segment.")
-                    rfm_data_filtered_plots = pd.DataFrame()
 
                 if rfm_data_filtered_plots.empty:
                     st.warning("No data available for the selected segments and VIP statuses.")
                 else:
-                    # Pie chart of RFM segments
-                    st.subheader("Distribution of RFM Segments")
-                    rfm_segment_counts = rfm_data_filtered_plots['RFM_segment_label'].value_counts().reset_index()
-                    rfm_segment_counts.columns = ['RFM_segment_label', 'Count']
+                    # Create tabs for charts
+                    tab4, tab1, tab2, tab3 = st.tabs(["Customer Segmentation Data", "Pie Chart", "3D Scatter Plot", "Histograms"])
 
-                    fig_pie = px.pie(
-                        rfm_segment_counts,
-                        names='RFM_segment_label',
-                        values='Count',
-                        color='RFM_segment_label',
-                        color_discrete_map=COLOR_MAP,
-                        hole=0.4
-                    )
+                    # Tab 1: Pie Chart
+                    with tab1:
+                        st.subheader("Distribution of RFM Segments")
+                        rfm_segment_counts = rfm_data_filtered_plots['RFM_segment_label'].value_counts().reset_index()
+                        rfm_segment_counts.columns = ['RFM_segment_label', 'Count']
 
-                    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                        fig_pie = px.pie(
+                            rfm_segment_counts,
+                            names='RFM_segment_label',
+                            values='Count',
+                            color='RFM_segment_label',
+                            color_discrete_map=COLOR_MAP,
+                            hole=0.4
+                        )
+                        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                        st.plotly_chart(fig_pie)
 
-                    st.plotly_chart(fig_pie)
+                    # Tab 2: 3D Scatter Plot
+                    with tab2:
+                        st.subheader("3D Scatter Plot of RFM Segments")
+                        fig_3d = px.scatter_3d(
+                            rfm_data_filtered_plots,
+                            x='Recency_norm',
+                            y='Frequency_norm',
+                            z='Monetary_norm',
+                            color='RFM_segment_label',
+                            color_discrete_map=COLOR_MAP,
+                            hover_data=['Customer ID', 'First Name', 'Last Name', 'VIP Status'],
+                            title='RFM Segments in Normalized Space'
+                        )
+                        fig_3d.update_layout(
+                            scene=dict(
+                                xaxis_title='Recency (Higher is Better)',
+                                yaxis_title='Frequency',
+                                zaxis_title='Monetary Value'
+                            ),
+                            legend_title='RFM Segments'
+                        )
+                        st.plotly_chart(fig_3d)
 
-                    # 3D Scatter Plot
-                    st.subheader("3D Scatter Plot of RFM Segments")
+                    # Tab 3: Histograms
+                    with tab3:
+                        st.subheader("RFM Metrics Distribution")
 
-                    fig_3d = px.scatter_3d(
-                        rfm_data_filtered_plots,
-                        x='Recency_norm',
-                        y='Frequency_norm',
-                        z='Monetary_norm',
-                        color='RFM_segment_label',
-                        color_discrete_map=COLOR_MAP,
-                        hover_data=['Customer ID', 'First Name', 'Last Name', 'VIP Status'],
-                        title='RFM Segments in Normalized Space'
-                    )
+                        # Histogram for Recency
+                        fig_recency = px.histogram(
+                            rfm_data_filtered_plots,
+                            x='Recency',
+                            nbins=50,
+                            title='Recency Distribution',
+                            color='RFM_segment_label',
+                            color_discrete_map=COLOR_MAP
+                        )
+                        st.plotly_chart(fig_recency)
 
-                    fig_3d.update_layout(
-                        scene=dict(
-                            xaxis_title='Recency (Higher is Better)',
-                            yaxis_title='Frequency',
-                            zaxis_title='Monetary Value'
-                        ),
-                        legend_title='RFM Segments'
-                    )
+                        # Histogram for Frequency
+                        fig_frequency = px.histogram(
+                            rfm_data_filtered_plots,
+                            x='Frequency',
+                            nbins=50,
+                            title='Frequency Distribution',
+                            color='RFM_segment_label',
+                            color_discrete_map=COLOR_MAP
+                        )
+                        st.plotly_chart(fig_frequency)
 
-                    st.plotly_chart(fig_3d)
+                        # Histogram for Monetary
+                        fig_monetary = px.histogram(
+                            rfm_data_filtered_plots,
+                            x='Monetary',
+                            nbins=50,
+                            title='Monetary Value Distribution',
+                            labels={'Monetary': 'Monetary Value'},
+                            color='RFM_segment_label',
+                            color_discrete_map=COLOR_MAP
+                        )
+                        st.plotly_chart(fig_monetary)
 
-                    # Additional plots
-                    st.subheader("RFM Metrics Distribution")
+                    # Tab 4: Customer Segmentation Data
+                    with tab4:
+                        st.subheader("Customer Segmentation Data")
 
-                    # Histogram for Recency
-                    fig_recency = px.histogram(
-                        rfm_data_filtered_plots,
-                        x='Recency',
-                        nbins=50,
-                        title='Recency Distribution',
-                        color='RFM_segment_label',
-                        color_discrete_map=COLOR_MAP
-                    )
-                    st.plotly_chart(fig_recency)
+                        @st.cache_data
+                        def get_filter_options(data, rfm_data):
+                            product_options = sorted(data['عنوان محصول'].dropna().unique().tolist())
+                            stay_options = sorted(rfm_data['Is Monthly'].dropna().unique().tolist())
+                            current_status_options = sorted(rfm_data['Is staying'].dropna().unique().tolist())
+                            return product_options, stay_options, current_status_options
 
-                    # Histogram for Frequency
-                    fig_frequency = px.histogram(
-                        rfm_data_filtered_plots,
-                        x='Frequency',
-                        nbins=50,
-                        title='Frequency Distribution',
-                        color='RFM_segment_label',
-                        color_discrete_map=COLOR_MAP
-                    )
-                    st.plotly_chart(fig_frequency)
+                        product_options, stay_options, current_status_options = get_filter_options(data, rfm_data)
 
-                    # Histogram for Monetary
-                    fig_monetary = px.histogram(
-                        rfm_data_filtered_plots,
-                        x='Monetary',
-                        nbins=50,
-                        title='Monetary Value Distribution',
-                        labels={'Monetary': 'Monetary Value'},
-                        color='RFM_segment_label',
-                        color_discrete_map=COLOR_MAP
-                    )
-                    st.plotly_chart(fig_monetary)
+                        # Initialize the filtered DataFrame with the full RFM data
+                        rfm_data_filtered_table = rfm_data_filtered_global.copy()
 
-                # ------------------ Customer Segmentation Data Table ------------------
 
-                st.subheader("Customer Segmentation Data")
+                        
 
-                @st.cache_data
-                def get_filter_options(data, rfm_data):
-                    product_options = sorted(data['عنوان محصول'].dropna().unique().tolist())
-                    stay_options = sorted(rfm_data['Is Monthly'].dropna().unique().tolist())
-                    current_status_options = sorted(rfm_data['Is staying'].dropna().unique().tolist())
-                    return product_options, stay_options, current_status_options
+                        # ------------------ Product Filter ------------------
+                        st.subheader("Filter Table by Products")
+                        select_all_products_table = st.checkbox("Select all products", value=True, key='select_all_products_table')
 
-                product_options, stay_options, current_status_options = get_filter_options(data, rfm_data)
+                        if select_all_products_table:
+                            selected_products_table = product_options
+                        else:
+                            selected_products_table = st.multiselect(
+                                "Select products (عنوان محصول):",
+                                options=product_options,
+                                default=[],
+                                key='products_multiselect_table'
+                            )
 
-                # Initialize the filtered DataFrame with the full RFM data
-                rfm_data_filtered_table = rfm_data_filtered_global.copy()
+                        if selected_products_table:
+                            # Get customer IDs who have purchased the selected products
+                            customers_with_selected_products = data[data['عنوان محصول'].isin(selected_products_table)]['کد دیدار شخص معامله'].unique()
+                            # Filter RFM data
+                            rfm_data_filtered_table = rfm_data_filtered_table[rfm_data_filtered_table['Customer ID'].isin(customers_with_selected_products)]
+                        else:
+                            st.warning("No products selected. Displaying all products.")
+#################################
+                        # اضافه کردن ورودی برای تعداد شب
+                        min_nights = st.number_input(
+                            "Enter minimum number of nights for monthly guests:",
+                            min_value=0, value=15, step=1, key='min_nights_filter'
+                        )
 
-                # ------------------ Product Filter ------------------
+                        # افزودن ستون Is Monthly
+                        rfm_data_filtered_table['Is Monthly'] = (rfm_data_filtered_table['Total Nights']/ rfm_data_filtered_table['Frequency'])  >= min_nights
 
-                st.subheader("Filter Table by Products")
-                select_all_products_table = st.checkbox("Select all products", value=True, key='select_all_products_table')
+                        # ------------------ Staying Type Filter ------------------
+                        select_all_staying_table = st.checkbox("Select all guest types (Monthly or not)", value=True, key='select_all_staying_table')
 
-                if select_all_products_table:
-                    selected_products_table = product_options
-                else:
-                    selected_products_table = st.multiselect(
-                        "Select products (عنوان محصول):",
-                        options=product_options,
-                        default=[],
-                        key='products_multiselect_table'
-                    )
+                        if select_all_staying_table:
+                            selected_staying_table = stay_options
+                        else:
+                            selected_staying_table = st.multiselect(
+                                "Select guest type (monthly or not):",
+                                options=stay_options,
+                                default=[],
+                                key='guest_type_multiselect_table'
+                            )
 
-                if selected_products_table:
-                    # Get customer IDs who have purchased the selected products
-                    customers_with_selected_products = data[data['عنوان محصول'].isin(selected_products_table)]['کد دیدار شخص معامله'].unique()
-                    # Filter RFM data
-                    rfm_data_filtered_table = rfm_data_filtered_table[rfm_data_filtered_table['Customer ID'].isin(customers_with_selected_products)]
-                else:
-                    st.warning("No products selected. Displaying all products.")
+                        if selected_staying_table:
+                            # Filter RFM data
+                            rfm_data_filtered_table = rfm_data_filtered_table[rfm_data_filtered_table['Is Monthly'].isin(selected_staying_table)]
+                        else:
+                            st.warning("No guest types selected. Displaying all guest types.")
 
-                # ------------------ Staying Type Filter ------------------
+##############################################
 
-                select_all_staying_table = st.checkbox("Select all guest types (Monthly or not)", value=True, key='select_all_staying_table')
+                        # ------------------ Current Status Filter ------------------
+                        select_all_current_status_table = st.checkbox("Select all current status (currently staying or not)", value=True, key='select_all_current_status_table')
 
-                if select_all_staying_table:
-                    selected_staying_table = stay_options
-                else:
-                    selected_staying_table = st.multiselect(
-                        "Select guest type (monthly or not):",
-                        options=stay_options,
-                        default=[],
-                        key='guest_type_multiselect_table'
-                    )
+                        if select_all_current_status_table:
+                            selected_current_status_table = current_status_options
+                        else:
+                            selected_current_status_table = st.multiselect(
+                                "Select current status (currently staying or not):",
+                                options=current_status_options,
+                                default=[],
+                                key='current_status_multiselect_table'
+                            )
 
-                if selected_staying_table:
-                    # Filter RFM data
-                    rfm_data_filtered_table = rfm_data_filtered_table[rfm_data_filtered_table['Is Monthly'].isin(selected_staying_table)]
-                else:
-                    st.warning("No guest types selected. Displaying all guest types.")
+                        if selected_current_status_table:
+                            # Filter RFM data
+                            rfm_data_filtered_table = rfm_data_filtered_table[rfm_data_filtered_table['Is staying'].isin(selected_current_status_table)]
+                        else:
+                            st.warning("No current status selected. Displaying all statuses.")
 
-                # ------------------ Current Status Filter ------------------
+                        st.write(rfm_data_filtered_table[['Customer ID', 'First Name', 'Last Name', 'VIP Status', 'Phone Number', 'Recency', 'Frequency', 'Monetary','average stay','Is Monthly','Is staying','Favorite Product','Last Product', 'RFM_segment_label']])
 
-                select_all_current_status_table = st.checkbox("Select all current status (currently staying or not)", value=True, key='select_all_current_status_table')
+                        # Optionally, allow users to download the data
+                        csv_data = convert_df(rfm_data_filtered_table)
+                        excel_data = convert_df_to_excel(rfm_data_filtered_table)
 
-                if select_all_current_status_table:
-                    selected_current_status_table = current_status_options
-                else:
-                    selected_current_status_table = st.multiselect(
-                        "Select current status (currently staying or not):",
-                        options=current_status_options,
-                        default=[],
-                        key='current_status_multiselect_table'
-                    )
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.download_button(
+                                label="Download data as CSV",
+                                data=csv_data,
+                                file_name='rfm_segmentation.csv',
+                                mime='text/csv',
+                            )
+                        with col2:
+                            st.download_button(
+                                label="Download data as Excel",
+                                data=excel_data,
+                                file_name='rfm_segmentation.xlsx',
+                                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            )
 
-                if selected_current_status_table:
-                    # Filter RFM data
-                    rfm_data_filtered_table = rfm_data_filtered_table[rfm_data_filtered_table['Is staying'].isin(selected_current_status_table)]
-                else:
-                    st.warning("No current status selected. Displaying all statuses.")
+                        
+##
 
-                st.write(rfm_data_filtered_table[['Customer ID', 'First Name', 'Last Name', 'VIP Status', 'Phone Number', 'Recency', 'Frequency', 'Monetary','average stay','Is Monthly','Is staying','Favorite Product','Last Product', 'RFM_segment_label']])
-
-                # Optionally, allow users to download the data
-                csv_data = convert_df(rfm_data_filtered_table)
-                excel_data = convert_df_to_excel(rfm_data_filtered_table)
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.download_button(
-                        label="Download data as CSV",
-                        data=csv_data,
-                        file_name='rfm_segmentation.csv',
-                        mime='text/csv',
-                    )
-                with col2:
-                    st.download_button(
-                        label="Download data as Excel",
-                        data=excel_data,
-                        file_name='rfm_segmentation.xlsx',
-                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    )
 
             elif page == 'Compare RFM Segments Over Time':
+
+
                 # ------------------ Compare RFM Segments Over Time ------------------
 
                 st.subheader("Compare RFM Segments Over Time")
@@ -953,150 +997,164 @@ def main():
                 # Get unique clusters from RFM data
                 cluster_options = rfm_data['RFM_segment_label'].unique().tolist()
                 cluster_options.sort()
-
-                # Move checkboxes outside the form to ensure they trigger app reruns
                 select_all_clusters = st.checkbox("Select all clusters", value=True, key='select_all_clusters_portfolio')
 
-                select_all_products_portfolio = st.checkbox("Select all products", value=True, key='select_all_products_portfolio')
+                if select_all_clusters:
+                    selected_clusters = cluster_options
+                else:
+                    selected_clusters = st.multiselect(
+                        "Select Clusters:",
+                        options=cluster_options,
+                        default=[],
+                        key='clusters_multiselect_portfolio'
+                    )
 
-                # VIP Filter for this page
+                # Filter by Complex
+                complex_options = data['Complex'].dropna().unique().tolist()
+                complex_options.sort()
+                select_all_complex = st.checkbox("Select all complexes", value=True, key='select_all_complex')
+
+                if select_all_complex:
+                    selected_complexes = complex_options
+                else:
+                    selected_complexes = st.multiselect(
+                        "Select Complexes:",
+                        options=complex_options,
+                        default=[],
+                        key='complexes_multiselect'
+                    )
+
+                data_filtered_by_complex = data[data['Complex'].isin(selected_complexes)]
+
+                # Filter by Type
+                type_options = data_filtered_by_complex['عنوان محصول'].dropna().unique().tolist()
+                type_options.sort()
+                select_all_types = st.checkbox("Select all types", value=True, key='select_all_types')
+
+                if select_all_types:
+                    selected_types = type_options
+                else:
+                    selected_types = st.multiselect(
+                        "Select Types:",
+                        options=type_options,
+                        default=[],
+                        key='types_multiselect'
+                    )
+
+                data_filtered_by_type = data_filtered_by_complex[data_filtered_by_complex['عنوان محصول'].isin(selected_types)]
+
+                # Filter by Blacklist Status
+                blacklist_options = sorted(data['BlackList Status'].unique())
+                select_all_blacklist = st.checkbox("Select all BlackList statuses", value=True, key='select_all_blacklist')
+
+                if select_all_blacklist:
+                    selected_blacklist = blacklist_options
+                else:
+                    selected_blacklist = st.multiselect(
+                        "Select BlackList Status:",
+                        options=blacklist_options,
+                        default=[],
+                        key='blacklist_multiselect'
+                    )
+
+                data_filtered_by_blacklist = data_filtered_by_type[data_filtered_by_type['BlackList Status'].isin(selected_blacklist)]
+
+                # VIP Filter
                 vip_options_page = sorted(rfm_data['VIP Status'].unique())
                 select_all_vips_page = st.checkbox("Select all VIP statuses", value=True, key='select_all_vips_portfolio')
 
-                # Create a form to prevent automatic reruns
+                if select_all_vips_page:
+                    selected_vips_portfolio = vip_options_page
+                else:
+                    selected_vips_portfolio = st.multiselect(
+                        "Select VIP Status:",
+                        options=vip_options_page,
+                        default=[],
+                        key='vips_multiselect_portfolio'
+                    )
+
+                # Apply filters
                 with st.form(key='portfolio_form'):
-                    # Multiselect for clusters
-                    if select_all_clusters:
-                        selected_clusters = cluster_options
-                    else:
-                        selected_clusters = st.multiselect(
-                            "Select Clusters:",
-                            options=cluster_options,
-                            default=[],
-                            key='clusters_multiselect_portfolio'
-                        )
-
-                    # Multiselect for products
-                    if select_all_products_portfolio:
-                        selected_products_portfolio = product_options
-                    else:
-                        selected_products_portfolio = st.multiselect(
-                            "Select Products (عنوان محصول):",
-                            options=product_options,
-                            default=[],
-                            key='products_multiselect_portfolio'
-                        )
-
-                    # VIP statuses
-                    if select_all_vips_page:
-                        selected_vips_portfolio = vip_options_page
-                    else:
-                        selected_vips_portfolio = st.multiselect(
-                            "Select VIP Status:",
-                            options=vip_options_page,
-                            default=[],
-                            key='vips_multiselect_portfolio'
-                        )
-
-                    # Apply button
                     apply_portfolio = st.form_submit_button(label='Apply')
 
                 if apply_portfolio:
                     if not selected_clusters:
                         st.warning("Please select at least one cluster.")
+                    elif not selected_vips_portfolio:
+                        st.warning("Please select at least one VIP status.")
                     else:
-                        if not selected_products_portfolio:
-                            st.warning("Please select at least one product.")
+                        # Get customers in selected clusters and VIP statuses
+                        customers_in_clusters = rfm_data[(rfm_data['RFM_segment_label'].isin(selected_clusters)) &
+                                                        (rfm_data['VIP Status'].isin(selected_vips_portfolio))]['Customer ID'].unique()
+
+                        # Filter deals data
+                        deals_filtered = data_filtered_by_blacklist[data_filtered_by_blacklist['کد دیدار شخص معامله'].isin(customers_in_clusters)]
+
+                        if deals_filtered.empty:
+                            st.warning("No deals found for the selected clusters, VIP statuses, and products.")
                         else:
-                            if not selected_vips_portfolio:
-                                st.warning("Please select at least one VIP status.")
-                            else:
-                                # Get customers in selected clusters and VIP statuses
-                                customers_in_clusters = rfm_data[(rfm_data['RFM_segment_label'].isin(selected_clusters)) &
-                                                                 (rfm_data['VIP Status'].isin(selected_vips_portfolio))]['Customer ID'].unique()
+                            # Frequency distribution
+                            frequency_distribution = deals_filtered.groupby('عنوان محصول').size().reset_index(name='Frequency')
 
-                                # Filter deals data for these customers and selected products
-                                deals_filtered = data[data['کد دیدار شخص معامله'].isin(customers_in_clusters)]
-                                deals_filtered = deals_filtered[deals_filtered['عنوان محصول'].isin(selected_products_portfolio)]
+                            # Monetary distribution
+                            monetary_distribution = deals_filtered.groupby('عنوان محصول')['ارزش معامله'].sum().reset_index()
 
-                                # Apply global filters
-                                # deals_filtered = deals_filtered[
-                                #     (deals_filtered['عنوان محصول'].isin(selected_products_global)) &
-                                #     (deals_filtered['مسئول معامله'].isin(selected_sellers)) &
-                                #     (deals_filtered['شیوه آشنایی معامله'].isin(selected_sale_channels))
-                                # ]
+                            # Plot Frequency Distribution
+                            st.subheader("Frequency Distribution of Products")
+                            fig_freq = px.bar(
+                                frequency_distribution,
+                                x='عنوان محصول',
+                                y='Frequency',
+                                title='Frequency Distribution',
+                                labels={'عنوان محصول': 'Product', 'Frequency': 'Number of Purchases'},
+                                text='Frequency'
+                            )
+                            fig_freq.update_traces(textposition='outside')
+                            st.plotly_chart(fig_freq)
 
-                                if deals_filtered.empty:
-                                    st.warning("No deals found for the selected clusters, VIP statuses, and products.")
-                                else:
-                                    # Calculate distributions
-                                    # Frequency: Number of times each product was bought
-                                    frequency_distribution = deals_filtered.groupby('عنوان محصول').size().reset_index(name='Frequency')
+                            # Plot Monetary Distribution
+                            st.subheader("Monetary Distribution of Products")
+                            fig_monetary = px.bar(
+                                monetary_distribution,
+                                x='عنوان محصول',
+                                y='ارزش معامله',
+                                title='Monetary Distribution',
+                                labels={'عنوان محصول': 'Product', 'ارزش معامله': 'Total Monetary Value'},
+                                text='ارزش معامله'
+                            )
+                            fig_monetary.update_traces(textposition='outside')
+                            st.plotly_chart(fig_monetary)
 
-                                    # Monetary: Total money spent on each product
-                                    monetary_distribution = deals_filtered.groupby('عنوان محصول')['ارزش معامله'].sum().reset_index()
+                            # Customer Details Table
+                            st.subheader("Customer Details")
+                            successful_deals = deals_filtered[deals_filtered['وضعیت معامله'] == 'موفق']
+                            customer_nights = successful_deals.groupby(['کد دیدار شخص معامله', 'عنوان محصول'])['تعداد شب'].sum().unstack(fill_value=0)
 
-                                    # Plot Frequency Distribution
-                                    st.subheader("Frequency Distribution of Products")
-                                    fig_freq = px.bar(
-                                        frequency_distribution,
-                                        x='عنوان محصول',
-                                        y='Frequency',
-                                        title='Frequency Distribution',
-                                        labels={'عنوان محصول': 'Product', 'Frequency': 'Number of Purchases'},
-                                        text='Frequency'
-                                    )
-                                    fig_freq.update_traces(textposition='outside')
-                                    st.plotly_chart(fig_freq)
+                            customer_details = rfm_data[rfm_data['Customer ID'].isin(customers_in_clusters)][['Customer ID', 'First Name', 'Last Name', 'VIP Status','average stay','Is Monthly','Is staying', 'RFM_segment_label', 'Recency', 'Frequency', 'Monetary']]
+                            customer_details = customer_details.merge(customer_nights, left_on='Customer ID', right_index=True, how='inner').fillna(0)
 
-                                    # Plot Monetary Distribution
-                                    st.subheader("Monetary Distribution of Products")
-                                    fig_monetary = px.bar(
-                                        monetary_distribution,
-                                        x='عنوان محصول',
-                                        y='ارزش معامله',
-                                        title='Monetary Distribution',
-                                        labels={'عنوان محصول': 'Product', 'ارزش معامله': 'Total Monetary Value'},
-                                        text='ارزش معامله'
-                                    )
-                                    fig_monetary.update_traces(textposition='outside')
-                                    st.plotly_chart(fig_monetary)
+                            st.write(customer_details)
 
-                                    # ------------------ Customer Table ------------------
+                            # Download buttons
+                            csv_data = convert_df(customer_details)
+                            excel_data = convert_df_to_excel(customer_details)
 
-                                    st.subheader("Customer Details")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.download_button(
+                                    label="Download data as CSV",
+                                    data=csv_data,
+                                    file_name='portfolio_analysis.csv',
+                                    mime='text/csv',
+                                )
+                            with col2:
+                                st.download_button(
+                                    label="Download data as Excel",
+                                    data=excel_data,
+                                    file_name='portfolio_analysis.xlsx',
+                                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                )
 
-                                    # Get successful deals
-                                    successful_deals = deals_filtered[deals_filtered['وضعیت معامله'] == 'موفق']
-
-                                    # Sum of 'تعداد شب' per customer per product
-                                    customer_nights = successful_deals.groupby(['کد دیدار شخص معامله', 'عنوان محصول'])['تعداد شب'].sum().unstack(fill_value=0)
-
-                                    # Merge with RFM data
-                                    customer_details = rfm_data[rfm_data['Customer ID'].isin(customers_in_clusters)][['Customer ID', 'First Name', 'Last Name', 'VIP Status','average stay','Is Monthly','Is staying', 'RFM_segment_label', 'Recency', 'Frequency', 'Monetary']]
-                                    customer_details = customer_details.merge(customer_nights, left_on='Customer ID', right_index=True, how='inner').fillna(0)
-
-                                    st.write(customer_details)
-
-                                    # Download buttons
-                                    csv_data = convert_df(customer_details)
-                                    excel_data = convert_df_to_excel(customer_details)
-
-                                    col1, col2 = st.columns(2)
-                                    with col1:
-                                        st.download_button(
-                                            label="Download data as CSV",
-                                            data=csv_data,
-                                            file_name='portfolio_analysis.csv',
-                                            mime='text/csv',
-                                        )
-                                    with col2:
-                                        st.download_button(
-                                            label="Download data as Excel",
-                                            data=excel_data,
-                                            file_name='portfolio_analysis.xlsx',
-                                            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                                        )
             elif page == 'Customer Batch Edit':
 
                     st.title("Customer Batch Edit")
