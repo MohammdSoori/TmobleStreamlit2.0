@@ -18,7 +18,7 @@ import openpyxl
 
 # Replace with your actual API key
 # api_key = st.secrets["api_key"]
-api_key = st.secrets["api_key"]
+api_key="test"
 # Base URL for the API
 base_url = 'https://app.didar.me/api'
 
@@ -1713,12 +1713,12 @@ def main():
                     # Input fields for the word and action
                     preset_word = st.text_input("Enter the word to add/remove")
                     action = st.selectbox("Choose an action", options=["Select", "Add", "Remove"])
-                    password = st.text_input("Enter  to confirm action", type="")
+                    password = st.text_input("Enter password to confirm action", type="password")
 
                     if st.button("Execute"):
 
-                        # Validate 
-                        if password != st.secrets["change_password"]:
+                        # Validate password
+                        if password != "test":
                             st.error("Invalid password. Please try again.")
                         elif uploaded_file is None:
                             st.error("Please upload a valid Excel file.")
@@ -5039,7 +5039,7 @@ def main():
 
                             # Apply Changes Button
                             if st.button('APPLY CHANGES'):
-                                 if password != st.secrets["change_password"]:
+                                if password != "test":
                                     st.error('Incorrect password.')
                                 else:
                                     changed_vip_customers = edited_df[edited_df['VIP Status'] != edited_df['New VIP Status']]
