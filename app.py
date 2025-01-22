@@ -13,7 +13,7 @@ import re
 import unicodedata
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
-import statsmodels.api as sm  # for regression
+# import statsmodels.api as sm  # for regression
 import openpyxl
 
 # Replace with your actual API key
@@ -970,7 +970,7 @@ def main():
             
             # ------------------ Navigation ------------------
             st.sidebar.header("Navigation")
-            page = st.sidebar.radio("Go to", ['General', 'Churned Analysis','Compare RFM Segments Over Time', 'Portfolio Analysis', 'Seller Analysis', 'Sale Channel Analysis', 'VIP Analysis','Customer Batch Edit', 'Customer Inquiry Module','Arrival Analysis','Price Elasticity Analysis'])
+            page = st.sidebar.radio("Go to", ['General', 'Churned Analysis','Compare RFM Segments Over Time', 'Portfolio Analysis', 'Seller Analysis', 'Sale Channel Analysis', 'VIP Analysis','Customer Batch Edit', 'Customer Inquiry Module','Arrival Analysis'])
 
             filtered_data = data.copy()
 
@@ -1386,8 +1386,8 @@ def main():
                         # Done with Tab 4 in 'General' page
             ###############################################################################
 
-            elif page == 'Price Elasticity Analysis':
-                price_elasticity_page(data)
+            # elif page == 'Price Elasticity Analysis':
+            #     price_elasticity_page(data)
             elif page == 'Churned Analysis':
                 churned_analysis_page(rfm_data) 
             elif page == 'Compare RFM Segments Over Time':
