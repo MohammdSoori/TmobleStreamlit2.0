@@ -72,434 +72,6 @@ def extract_vip_status(name_series):
 
 
 
-############################################################################
-# OPTIONAL HELPER: If you already have a function that adds the Probability_of_Churn,
-# CLTV, etc. to your RFM data, you can reuse it instead of defining it again.
-############################################################################
-@st.cache_data
-def add_churn_metrics(df_in):
-    """
-    Example function to add Probability_of_Churn, CLTV, CRR, and a Recency_norm column
-    to the existing RFM DataFrame. This is a placeholder; in practice, you'd replace it
-    with a real model or real computations.
-    """
-    df = df_in.copy()
-    if df.empty:
-        return df
-
-    # Ensure columns exist
-    required_cols = ["Recency", "Frequency", "Monetary"]
-    for c in required_cols:
-        if c not in df.columns:
-            df[c] = 0
-
-    # 1) Create a synthetic churn label: e.g., churn if Recency > 200
-    df['churn_label'] = np.where(df['Recency'] > 200, 1, 0)
-
-    # Train a quick logistic regression (toy example)
-    from sklearn.linear_model import LogisticRegression
-    X = df[['Recency', 'Frequency', 'Monetary']].fillna(0)
-    y = df['churn_label']
-
-    if len(X['Recency'].unique()) > 1:  # at least some variance
-        model = LogisticRegression()
-        model.fit(X, y)
-        df['Probability_of_Churn'] = model.predict_proba(X)[:, 1]
-    else:
-        # Fallback if no variance
-        df['Probability_of_Churn'] = 0.5
-
-    # 2) Customer_Lifespan: naive approach = 1 / Probability_of_Churn
-    df['Customer_Lifespan'] = np.where(
-        df['Probability_of_Churn'] < 0.01,
-        500,  # cap for near-zero churn
-        1.0 / df['Probability_of_Churn']
-    )
-
-    # 3) CLTV: naive approach = Monetary * Frequency * Customer_Lifespan
-    df['CLTV'] = df['Monetary'] * df['Frequency'] * df['Customer_Lifespan']
-
-    # 4) CRR = 1 - Probability_of_Churn
-    df['CRR'] = 1.0 - df['Probability_of_Churn']
-
-    # 5) Recency_norm using MinMax scaling, then invert so “more recent” is higher
-    scaler = MinMaxScaler()
-    if df['Recency'].nunique() > 1:
-        df['Recency_norm'] = scaler.fit_transform(df[['Recency']])
-        df['Recency_norm'] = 1 - df['Recency_norm']  # invert
-    else:
-        df['Recency_norm'] = 1  # if no variance, everything is 1
-
-    # Drop the synthetic label
-    df.drop(columns=['churn_label'], inplace=True)
-
-    return df
-
-############################################################################
-# MAIN PAGE FUNCTION: "Churned Analysis"
-############################################################################
-def churned_analysis_page(rfm_data_original: pd.DataFrame):
-    """
-    Streamlit page for analyzing and exporting customers in:
-      - 'Churned'
-      - 'Lost Big Spenders'
-      - 'Big Loss'
-      - 'At Risk'
-    segments, with further clustering by Probability_of_Churn, CLTV, Recency norm, etc.
-    """
-    st.title("Churned Analysis")
-
-    # 1) Filter to the relevant RFM segments
-    target_segments = ["Churned", "Lost Big Spenders", "Big Loss", "At Risk"]
-    churn_df = rfm_data_original[rfm_data_original['RFM_segment_label'].isin(target_segments)].copy()
-
-    if churn_df.empty:
-        st.warning("No customers found in the specified churn-related segments.")
-        return
-
-    # 2) Add Probability_of_Churn, CLTV, Recency_norm, etc. (if not already present)
-    churn_df = add_churn_metrics(churn_df)
-
-    # 3) Let the user filter by these additional metrics
-    st.subheader("Filter by Probability of Churn and CLTV")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        min_churn = st.slider(
-            "Minimum Probability of Churn",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.5,
-            step=0.01
-        )
-    with col2:
-        min_cltv = st.number_input(
-            "Minimum CLTV",
-            min_value=0.0,
-            value=10000.0,
-            step=1000.0
-        )
-
-    # 4) Apply the filters
-    filtered_df = churn_df[
-        (churn_df['Probability_of_Churn'] >= min_churn) &
-        (churn_df['CLTV'] >= min_cltv)
-    ]
-
-    st.markdown(f"**Number of customers after filters:** {len(filtered_df)}")
-
-    if filtered_df.empty:
-        st.info("No customers match these filter criteria.")
-        return
-
-    # 5) Display Table
-    st.dataframe(filtered_df[[
-        'Customer ID', 'First Name', 'Last Name', 'Phone Number',
-        'RFM_segment_label', 'Recency', 'Recency_norm',
-        'Frequency', 'Monetary', 'Probability_of_Churn',
-        'Customer_Lifespan', 'CLTV', 'CRR'
-    ]].reset_index(drop=True))
-
-    # 6) Simple scatter: Probability_of_Churn vs. CLTV
-    st.subheader("Visualization: Probability of Churn vs. CLTV")
-    fig = px.scatter(
-        filtered_df,
-        x='Probability_of_Churn',
-        y='CLTV',
-        color='RFM_segment_label',
-        size='Monetary',
-        hover_data=['Customer ID', 'First Name', 'Last Name'],
-        color_discrete_sequence=px.colors.qualitative.Set2,
-        title="Churn vs. CLTV (size = Monetary)"
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # 7) Export buttons
-    st.subheader("Export Filtered Data")
-
-    def convert_to_csv(df):
-        return df.to_csv(index=False).encode('utf-8')
-
-    def convert_to_excel(df):
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='ChurnedAnalysis')
-        return output.getvalue()
-
-    csv_data = convert_to_csv(filtered_df)
-    excel_data = convert_to_excel(filtered_df)
-
-    colA, colB = st.columns(2)
-    with colA:
-        st.download_button(
-            label="Download as CSV",
-            data=csv_data,
-            file_name="churned_analysis.csv",
-            mime="text/csv"
-        )
-    with colB:
-        st.download_button(
-            label="Download as Excel",
-            data=excel_data,
-            file_name="churned_analysis.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-    st.success("Churned Analysis completed.")
-
-
-
-def price_elasticity_page(main_data):
-    """
-    A Streamlit page to analyze Price Elasticity by computing
-    average Arc Elasticity from consecutive day pairs.
-    
-    It expects:
-      1) `main_data` DataFrame: the main deals file already preprocessed.
-         Must have columns:
-             - 'تاریخ انجام معامله': the Gregorian date of the deal
-             - 'قیمت': numeric price in that deal
-             - 'عنوان محصول': product name in Persian
-      2) The user to upload the second file containing daily data per product code,
-         with columns:
-             - 'Date': The date in Gregorian
-             - columns named by product code, containing a measure (e.g., occupancy).
-    """
-
-    st.header("Price Elasticity Analysis (Arc Elasticity)")
-
-    # ----------------------- 1) Define Product Name → Code Mapping -----------------------
-    product_code_map = {
-        "ونک ۲ خواب F استاندارد": "VanakF",
-        "ولنجک A (بدون لباسشویی)": "VlnjkA",
-        "مرزداران (استاندارد) C": "MrzC",
-        "پارک وی ۷۰ متری A": "PrkwA",
-        "شریعتی (پاسداران) تیپ ۲": "Shrt2",
-        "بهشتی ۱ خواب جکوزی‌دار A": "BshtA",
-        "ولیعصر A استاندارد": "VlA",
-        "مرزداران (مستردار) A": "MrzA",
-        "میرداماد دیزاین مدرن CF": "MrdCFModern",
-        "میرداماد دیزاین صنعتی ۹۰ متری CF": "MrdICFndust90",
-        "میرداماد دیزاین مینیمال CF": "MrdICFMinimal",
-        "شریعتی (پاسداران) تیپ ۱": "Shrt1",
-        "جمهوری ۲خواب B": "NflB",
-        "میرداماد دیزاین نئوکلاسیک ۶۳ متری CF": "MrdICFNeoClassic63",
-        "بهشتی ۲ خواب B": "BshtB",
-        "ولیعصر B ویژه (بالکن‌دار)": "VlB",
-        "کشاورز B استاندارد": "KshB",
-        "پارک وی ۱۰۵ متری VIP": "PrkwVIP",
-        "کشاورز(بدون لباسشویی) A": "KshA",
-        "جمهوری ۱خواب A": "NflA",
-        "ونک ۱ خواب C استاندارد": "VanakC",
-        "ولنجک B (استاندارد)": "VlnjkB",
-        "جردن ۸۵ متری B (اکونومی)": "JrdB",
-        "پارک وی ۸۰ متری B": "PrkwB",
-        "جمهوری ۲خواب D": "NflD",
-        "بهشتی ۱ خواب (پذیرش پت) C": "BshtC",
-        "جردن ۸۵ متری C جنوبی (ویژه)": "JrdC",
-        "میرداماد دیزاین صنعتی ۷۵ متری CF": "MrdICFndust75",
-        "میرداماد دیزاین نئوکلاسیک ۸۰ متری CF": "MrdICFNeoClassic80",
-        "کوروش (استاندارد) A": "KorA",
-        "جردن ۹۰ متری A (استاندارد)": "JrdA",
-        "پارک وی C (پذیرش پت)": "PrkwC",
-        "جمهوری ۲خواب E": "NflE",
-        "میرداماد دیزاین نئوکلاسیک ۸۰ متری PF": "MrdIPFNeoClassic80",
-        "جردن D (پذیرش پت)": "JrdD",
-        "کوروش (ویژه) B": "KorB",
-        "کشاورز C ویژه": "KshC",
-        "میرداماد دیزاین صنعتی ۹۰ متری VIP2": "MrdIPFVIP2",
-        "میرداماد دیزاین مینیمال PF": "MrdIPFMinimal",
-        "ولنجک C (ویو شهر)": "VlnjkC",
-        "میرداماد دیزاین مدرن PF": "MrdIPFModern",
-        "میرداماد دیزاین صنعتی ۷۵ متری VIP1": "MrdIPFVIP1",
-        "ونک ۱ خواب B ویژه": "VanakB",
-        "بهشتی ۱ خواب جکوزی‌دار VIP": "BshtVIP1",
-        "جمهوری ۲خواب C": "NflC",
-        "بهشتی ۲ خواب - VIP2": "BshtVIP2",
-        "میرداماد دیزاین نئوکلاسیک ۶۳ متری PF": "MrdIPFNeoClassic63",
-        "ونک ۱ خواب A اکونومی": "VanakA",
-        "ونک ۲ خواب D اکونومی": "VanakD",
-        "ترنج ۲ خواب (مستر) C": "TrnjC",
-        "ترنج ۲ خواب (مستر) ‌‌E": "TrnjE",
-        "ترنج ۲ خواب B": "TrnjB",
-        "ترنج ۲ خواب A": "TrnjA",
-        "ترنج ۲ خواب (مستر) D": "TrnjD",
-        "ونک ۲ خواب E ویژه": "VanakE",
-    }
-
-    # ----------------------- 2) File Uploader for the Second File -----------------------
-    st.markdown("""
-    **Step 1:** Upload your second file which must contain:
-    - A column named **'Date'** (Gregorian date),
-    - Other columns named after product codes (e.g. 'VlnjkA', 'VanakF', etc.) 
-      containing some measure (e.g. occupancy).
-    """)
-    second_file = st.file_uploader("Choose the second file (XLSX or CSV)", type=["xlsx","csv"])
-
-    # If no file, just stop here
-    if not second_file:
-        st.info("Please upload your second file to proceed.")
-        return
-
-    # Load second file
-    try:
-        file_ext = second_file.name.split('.')[-1].lower()
-        if file_ext == "xlsx":
-            df2 = pd.read_excel(second_file)
-        else:
-            df2 = pd.read_csv(second_file)
-
-        # Ensure 'Date' is DateTime
-        df2['Date'] = pd.to_datetime(df2['Date'], errors='coerce')
-    except Exception as e:
-        st.error(f"Error reading the second file: {e}")
-        return
-
-    st.success("Second file loaded successfully!")
-    st.write("Preview of the second file:")
-    st.dataframe(df2.head())
-
-    # ----------------------- 3) Prepare Main Data for Daily Avg Price by Code -----------------------
-    # Make a copy of main_data so we don’t mutate the original
-    temp_main = main_data.copy()
-
-    # Ensure the deal date is in Gregorian datetime (should already be done in load_data, but just in case)
-    temp_main['تاریخ انجام معامله'] = pd.to_datetime(temp_main['تاریخ انجام معامله'], errors='coerce')
-
-    # Map Persian product names → product codes
-    def map_to_code(name):
-        name = str(name).strip()
-        return product_code_map.get(name, None)  # or some fallback if not found
-
-    temp_main['product_code'] = temp_main['عنوان محصول'].apply(map_to_code)
-
-    # Filter out rows where product_code is None (not in dictionary)
-    temp_main = temp_main[temp_main['product_code'].notna()]
-
-    # For each date & product_code, compute average 'قیمت'
-    temp_main.rename(columns={'تاریخ انجام معامله': 'DealDate'}, inplace=True)
-    daily_price = (
-        temp_main
-        .groupby(['DealDate', 'product_code'], as_index=False)['قیمت']
-        .mean()
-        .rename(columns={'قیمت': 'AvgPrice'})
-    )
-
-    # ----------------------- 4) Merge with the Second File -----------------------
-    # The second file presumably has columns: ['Date', 'VanakF', 'VlnjkA', ...]
-    # We'll melt it into a long format for merging.
-
-    # Exclude the 'Date' column from the melt
-    melt_cols = [col for col in df2.columns if col != 'Date']
-
-    # Melt the second file: each row = (Date, product_code, measure)
-    long_df2 = df2.melt(
-        id_vars='Date',
-        value_vars=melt_cols,
-        var_name='product_code',
-        value_name='Measure'  # e.g. occupancy measure
-    )
-
-    # Merge daily_price with long_df2 on (Date, product_code)
-    # daily_price has 'DealDate' as date, rename it to 'Date' for merging
-    daily_price.rename(columns={'DealDate': 'Date'}, inplace=True)
-    merged_df = pd.merge(daily_price, long_df2, on=['Date','product_code'], how='inner')
-
-    st.subheader("Merged Data Preview")
-    st.write("Here is how the daily average price merges with your second file’s measure:")
-    st.dataframe(merged_df.head(15))
-
-    # ----------------------- 5) Arc Elasticity Computation -----------------------
-    st.markdown("""
-    **Step 2:** Select the product code(s) below to analyze **Arc Elasticity** from consecutive days.
-    """)
-
-    all_codes = sorted(merged_df['product_code'].unique())
-    selected_codes = st.multiselect("Select product codes:", all_codes, default=all_codes[:1])
-    if not selected_codes:
-        st.warning("No product codes selected.")
-        return
-
-    def compute_average_arc_elasticity(subdf, price_col='AvgPrice', measure_col='Measure'):
-        """
-        Computes the average Arc Elasticity from consecutive-day pairs
-        for the given DataFrame subdf (already filtered to one product_code).
-
-        Arc Elasticity formula (between two points p1,q1 and p2,q2):
-          E_arc = ((q2 - q1) / ((q1 + q2)/2)) / ((p2 - p1) / ((p1 + p2)/2))
-
-        Steps:
-          1) Sort by Date.
-          2) For each consecutive pair (day i, day i+1), compute arc elasticity.
-          3) Return the average of all valid pairs. If no valid pair, return None.
-        """
-        # Drop rows with NaN or non-positive values
-        valid = subdf.dropna(subset=[price_col, measure_col, 'Date']).copy()
-        valid = valid[(valid[price_col] > 0) & (valid[measure_col] > 0)]
-
-        # Sort by Date
-        valid.sort_values('Date', inplace=True)
-
-        # We'll accumulate arc elasticity for consecutive days
-        arc_values = []
-        rows = valid.to_dict('records')
-
-        for i in range(len(rows) - 1):
-            p1, q1 = rows[i][price_col], rows[i][measure_col]
-            p2, q2 = rows[i+1][price_col], rows[i+1][measure_col]
-
-            # Avoid dividing by zero if p1 + p2 = 0 or q1 + q2 = 0
-            if (p1 + p2) <= 0 or (q1 + q2) <= 0:
-                continue
-
-            # If p1 == p2 or q1 == q2 exactly, the arc formula can still be computed,
-            # but might yield 0 or a degenerate value. We'll just let it proceed.
-            numerator = (q2 - q1) / ((q1 + q2) / 2.0)
-            denominator = (p2 - p1) / ((p1 + p2) / 2.0)
-
-            # If denominator is 0, skip
-            if abs(denominator) < 1e-12:
-                continue
-
-            e_arc = numerator / denominator
-            arc_values.append(e_arc)
-
-        if len(arc_values) == 0:
-            return None
-        return np.mean(arc_values)
-
-    # For each selected code, compute and display
-    for code in selected_codes:
-        st.write("---")
-        st.subheader(f"Product Code: `{code}`")
-
-        subdf = merged_df[merged_df['product_code'] == code].copy()
-        elasticity = compute_average_arc_elasticity(subdf)
-
-        if elasticity is None:
-            st.warning("Not enough valid consecutive-day pairs to compute arc elasticity.")
-            continue
-
-        st.write(f"**Average Arc Elasticity**: `{elasticity:.4f}`")
-
-        # Plot measure vs. price on a simple scatter
-        fig = px.scatter(
-            subdf,
-            x='AvgPrice',
-            y='Measure',
-            title=f"Measure vs. AvgPrice for {code}",
-            labels={'AvgPrice': 'Average Price', 'Measure': 'Measure'}
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    st.info("""
-    **Arc Elasticity Interpretation**:  
-    \- Negative values: as price goes up, measure (e.g. occupancy) goes down.  
-    \- Magnitude > 1: the measure is elastic (strong response).  
-    \- Magnitude < 1: inelastic (weak response).  
-    """)
-
-
 
 @st.cache_data
 def extract_blacklist_status(name_series):
@@ -518,226 +90,311 @@ def extract_blacklist_status(name_series):
 #############################
 
 
-
-# Function to load and preprocess data
 @st.cache_data
 def load_data(uploaded_file):
     # Load the Excel file
     data = pd.read_excel(uploaded_file)
 
-    # List of columns containing Jalali dates
+    # ----------------------------------------------------
+    # 1) Drop unwanted rows by 'مسئول معامله'
+    # ----------------------------------------------------
+    drop_operators = [
+        "S.Hadi Cheheltani",
+        "TECH TEAM",
+        "آرا رنجبر",
+        "امیرحسین جوادی",
+        "حسین رشیدی زاده",
+        "محمدرضا ایدرم",
+        "فرزین سوری"
+    ]
+    if 'مسئول معامله' in data.columns:
+        ops_lower = [op.lower() for op in drop_operators]
+        data = data[
+            ~data['مسئول معامله']
+                .astype(str)
+                .str.strip()
+                .str.lower()
+                .isin(ops_lower)
+        ]
+    else:
+        st.warning("Column 'مسئول معامله' not found in the data.")
+
+    # ----------------------------------------------------
+    # 2) Drop unwanted rows by 'نام خانوادگی شخص معامله'
+    # ----------------------------------------------------
+    drop_exact = [
+        "سبا خورشیدی (💎VIP)",
+        "فرشته فرج نژاد ( همکار) (💠VIP)",
+        "بهنام کبیری"
+    ]
+    if 'نام خانوادگی شخص معامله' in data.columns:
+        data = data[
+            ~data['نام خانوادگی شخص معامله']
+                .astype(str)
+                .isin(drop_exact)
+        ]
+        data = data[
+            ~data['نام خانوادگی شخص معامله']
+                .astype(str)
+                .str.contains(r'\(\s*همکار\s*\)', regex=True)
+        ]
+    else:
+        st.warning("Column 'نام خانوادگی شخص معامله' not found in the data.")
+
+    # ----------------------------------------------------
+    # Convert Jalali dates to Gregorian
+    # ----------------------------------------------------
     date_columns = [
         'تاریخ انجام معامله', 'تاریخ ایجاد معامله', 'تاریخ احتمالی انجام معامله',
         'تاریخ ورود', 'تاریخ خروج', 'شروع قرارداد', 'پایان قرارداد'
-        # Add any additional date columns here
     ]
-
-    # Convert Jalali dates to Gregorian
     for col in date_columns:
         if col in data.columns:
             data[col] = jalali_to_gregorian_vectorized(data[col])
-            # Ensure the date columns are datetime objects
             data[col] = pd.to_datetime(data[col], errors='coerce')
         else:
             st.warning(f"Column '{col}' not found in the data.")
 
-    # Clean 'تعداد شب' column by removing non-digit characters
+    # ----------------------------------------------------
+    # Clean 'تعداد شب' column
+    # ----------------------------------------------------
     if 'تعداد شب' in data.columns:
-        data['تعداد شب'] = data['تعداد شب'].astype(str).str.replace(r'[^\d.]', '', regex=True)  # Keep digits and decimal points
+        data['تعداد شب'] = (
+            data['تعداد شب']
+            .astype(str)
+            .str.replace(r'[^\d.]', '', regex=True)
+        )
         data['تعداد شب'] = pd.to_numeric(data['تعداد شب'], errors='coerce')
-        # Remove entries where 'تعداد شب' is unreasonably large (e.g., greater than 365)
-        data.loc[data['تعداد شب'] > 700, 'تعداد شب'] = np.nan
+        data.loc[data['تعداد شب'] > 1000, 'تعداد شب'] = np.nan
     else:
         st.warning("Column 'تعداد شب' not found in the data.")
 
-    # Similarly, convert 'ارزش معامله' to numeric
+    # ----------------------------------------------------
+    # Convert 'ارزش معامله' to numeric
+    # ----------------------------------------------------
     if 'ارزش معامله' in data.columns:
         data['ارزش معامله'] = pd.to_numeric(data['ارزش معامله'], errors='coerce')
     else:
         st.warning("Column 'ارزش معامله' not found in the data.")
 
+    # ----------------------------------------------------
     # Extract VIP Status
-    data['VIP Status'] = extract_vip_status(data['نام خانوادگی شخص معامله'])
+    # ----------------------------------------------------
+    data['VIP Status'] = extract_vip_status(data.get('نام خانوادگی شخص معامله', ''))
 
+    # ----------------------------------------------------
+    # Extract 'Complex' from 'عنوان محصول'
+    # ----------------------------------------------------
+    data['عنوان محصول'] = data.get('عنوان محصول', '').fillna('').astype(str)
 
-#############################################
+    def extract_complex(text):
+        mapping = {
+            r'\bمیرداماد\b': 'میرداماد',
+            r'\bپارک وی\b': 'پارک وی',
+            r'\bولنجک\b': 'ولنجک',
+            r'\bبهشتی\b': 'بهشتی',
+            r'\bجردن\b': 'جردن',
+            r'\bمرزداران\b': 'مرزداران',
+            r'\bاقدسیه\b': 'اقدسیه',
+            r'\bجمهوری\b': 'جمهوری',
+            r'\bکشاورز\b': 'کشاورز',
+            r'\bترنج\b': 'ترنج',
+            r'\bویلا\b': 'ویلا',
+            r'\bونک\b': 'ونک',
+            r'\bکوروش\b': 'کوروش',
+            r'\bشریعتی\b': 'شریعتی',
+            r'\bولیعصر\b': 'ولیعصر',
+            r'\bوزرا\b': 'وزرا'
+        }
+        for pattern, name in mapping.items():
+            if re.search(pattern, text):
+                return name
+        return 'نامشخص'
 
-    # تبدیل ستون 'عنوان محصول' به رشته و پر کردن مقادیر نامعتبر
-    data['عنوان محصول'] = data['عنوان محصول'].fillna('').astype(str)
-
-    def extract_complex(row):
-        if re.search(r'\bمیرداماد\b', row):
-            return 'میرداماد'
-        elif re.search(r'\bپارک وی\b', row):
-            return 'پارک وی'
-        elif re.search(r'\bولنجک\b', row):
-            return 'ولنجک'
-        elif re.search(r'\bبهشتی\b', row):
-            return 'بهشتی'
-        elif re.search(r'\bجردن\b', row):
-            return 'جردن'
-        elif re.search(r'\bمرزداران\b', row):
-            return 'مرزداران'
-        elif re.search(r'\bاقدسیه\b', row):
-            return 'اقدسیه'
-        elif re.search(r'\bجمهوری\b', row):
-            return 'جمهوری'
-        elif re.search(r'\bکشاورز\b', row):
-            return 'کشاورز'
-        elif re.search(r'\bترنج\b', row):
-            return 'ترنج'
-        elif re.search(r'\bویلا\b', row):
-            return 'ویلا'
-        elif re.search(r'\bونک\b', row):
-            return 'ونک'
-        elif re.search(r'\bکوروش\b', row):
-            return 'کوروش'
-        elif re.search(r'\bشریعتی\b', row):
-            return 'شریعتی'
-        elif re.search(r'\bولیعصر\b', row):
-            return 'ولیعصر'
-        elif re.search(r'\bوزرا\b', row):
-            return 'وزرا'
-        else:
-            return 'نامشخص'
-
-    # اضافه کردن ستون جدید برای مجتمع
     data['Complex'] = data['عنوان محصول'].apply(extract_complex)
 
+    # ----------------------------------------------------
+    # Extract BlackList Status
+    # ----------------------------------------------------
+    data['BlackList Status'] = extract_blacklist_status(
+        data.get('نام خانوادگی شخص معامله', '')
+    )
 
-    data['BlackList Status'] = extract_blacklist_status(data['نام خانوادگی شخص معامله'])
-
-
-
-
-#########################################
+    # ----------------------------------------------------
+    # Remove rows with unwanted 'عنوان محصول' values
+    # ----------------------------------------------------
+    if 'عنوان محصول' in data.columns:
+        data = data[
+            ~data['عنوان محصول']
+            .astype(str)
+            .str.strip()
+            .isin(["0"])
+        ]
+        data = data[
+            ~data['عنوان محصول']
+            .str.contains(r'خودرو|صبحانه|نفر اضافه', regex=True, na=False)
+        ]
+    else:
+        st.warning("Column 'عنوان محصول' not found in the data.")
 
     return data
 
-@st.cache_data
-def update_last_name(last_name, new_vip_status):
-    # Define the mapping between VIP status and emoji
-    vip_emoji_map = {
-        'Gold VIP': '💎',
-        'Silver VIP': '⭐',
-        'Bronze VIP': '💠'
-    }
-    
-    # Remove existing VIP-related emoji and text in parentheses
-    last_name = re.sub(r'\s*\((💎|⭐|💠)?\s*VIP\s*\)', '', last_name).strip()
-    
-    # If new VIP status is Non-VIP, return the updated last name
-    if new_vip_status == 'Non-VIP':
-        return last_name
-    
-    # Add the new VIP emoji in parentheses at the end of the last name
-    emoji = vip_emoji_map.get(new_vip_status, '')
-    if emoji:
-        last_name = f"{last_name} ({emoji}VIP)"
-    
-    return last_name
 
-# Define the function to update the contact's last name via API
 @st.cache_data
-def update_contact_last_name(phone_number, updated_last_name):
-    try:
-        # Endpoint for searching contacts
-        search_endpoint = '/contact/personsearch'
-    
-        # Full URL with API key for search
-        search_url = f"{base_url}{search_endpoint}?apikey={api_key}"
-    
-        # Request payload for searching the contact
-        search_payload = {
-            "Criteria": {
-                "IsDeleted": 0,
-                "IsPinned": -1,
-                "IsVIP": -1,
-                "LeadType": -1,
-                "Pin": -1,
-                "SortOrder": 1,
-                "Keywords": phone_number,
-                "OwnerId": "00000000-0000-0000-0000-000000000000",
-                "SearchFromTime": "1930-01-01T00:00:00.000Z",
-                "SearchToTime": "9999-12-01T00:00:00.000Z",
-                "CustomFields": [],
-                "FilterId": None
-            },
-            "From": 0,
-            "Limit": 30
-        }
-    
-        # Headers
-        headers = {
-            'Content-Type': 'application/json'
-        }
-    
-        # Step 1: Search for the contact
-        response = requests.post(search_url, headers=headers, json=search_payload)
-    
-        # Check if the request was successful
-        if response.status_code == 200:
-            # Parse the response JSON
-            response_data = response.json()
-            contacts = response_data.get('Response', {}).get('List', [])
-            
-            if contacts:
-                # Assuming the first contact is the desired one
-                contact = contacts[0]
-                contact_id = contact.get('Id')
-                
-                # Update the contact's LastName
-                contact['LastName'] = updated_last_name
-                # Update DisplayName if necessary
-                contact['DisplayName'] = (contact.get('FirstName', '') + ' ' + updated_last_name).strip()
-                
-                # Remove read-only or unnecessary fields
-                fields_to_remove = [
-                    'CanDelete', 'CanEdit', 'IsMine', 'HasAccess', '_Type', 'OwnerId_Old', 'Segments', 
-                    'Owner', 'ContactStatus', 'KeepInTouch', 'Fields'
-                ]
-                for field in fields_to_remove:
-                    contact.pop(field, None)
-    
-                # If 'Segments' are present, extract 'SegmentIds'
-                segments = contacts[0].get('Segments', [])
-                segment_ids = [segment.get('Id') for segment in segments]
-    
-                # Prepare the save payload
-                save_payload = {
-                    "Contact": contact,
-                    "SegmentIds": segment_ids
-                }
-    
-                # Endpoint to save/update the contact
-                save_endpoint = '/contact/save'
-                save_url = f"{base_url}{save_endpoint}?ApiKey={api_key}"
-    
-                # Make the POST request to save the updated contact
-                save_response = requests.post(save_url, headers=headers, json=save_payload)
-    
-                if save_response.status_code == 200:
-                    return True
-                else:
-                    print(f"Failed to update contact. Status code: {save_response.status_code}")
-                    print(f"Response: {save_response.text}")
-                    return False
-            else:
-                print("No contact found with the given Phone Number.")
-                return False
+def load_filtered_special_products(uploaded_file):
+    # Load the Excel file
+    data = pd.read_excel(uploaded_file)
+
+    # ----------------------------------------------------
+    # 1) Drop unwanted rows by 'مسئول معامله'
+    # ----------------------------------------------------
+    drop_operators = [
+        "S.Hadi Cheheltani",
+        "TECH TEAM",
+        "آرا رنجبر",
+        "امیرحسین جوادی",
+        "حسین رشیدی زاده",
+        "محمدرضا ایدرم",
+        "فرزین سوری"
+    ]
+    if 'مسئول معامله' in data.columns:
+        ops_lower = [op.lower() for op in drop_operators]
+        data = data[
+            ~data['مسئول معامله']
+                .astype(str)
+                .str.strip()
+                .str.lower()
+                .isin(ops_lower)
+        ]
+    else:
+        st.warning("Column 'مسئول معامله' not found in the data.")
+
+    # ----------------------------------------------------
+    # 2) Drop unwanted rows by 'نام خانوادگی شخص معامله'
+    # ----------------------------------------------------
+    drop_exact = [
+        "سبا خورشیدی (💎VIP)",
+        "فرشته فرج نژاد ( همکار) (💠VIP)",
+        "بهنام کبیری"
+    ]
+    if 'نام خانوادگی شخص معامله' in data.columns:
+        data = data[
+            ~data['نام خانوادگی شخص معامله']
+                .astype(str)
+                .isin(drop_exact)
+        ]
+        data = data[
+            ~data['نام خانوادگی شخص معامله']
+                .astype(str)
+                .str.contains(r'\(\s*همکار\s*\)', regex=True)
+        ]
+    else:
+        st.warning("Column 'نام خانوادگی شخص معامله' not found in the data.")
+
+    # ----------------------------------------------------
+    # Convert Jalali dates to Gregorian
+    # ----------------------------------------------------
+    date_columns = [
+        'تاریخ انجام معامله', 'تاریخ ایجاد معامله', 'تاریخ احتمالی انجام معامله',
+        'تاریخ ورود', 'تاریخ خروج', 'شروع قرارداد', 'پایان قرارداد'
+    ]
+    for col in date_columns:
+        if col in data.columns:
+            data[col] = jalali_to_gregorian_vectorized(data[col])
+            data[col] = pd.to_datetime(data[col], errors='coerce')
         else:
-            print(f"Failed to search for contact. Status code: {response.status_code}")
-            print(f"Response: {response.text}")
-            return False
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        return False
+            st.warning(f"Column '{col}' not found in the data.")
+
+    # ----------------------------------------------------
+    # Clean 'تعداد شب' column
+    # ----------------------------------------------------
+    if 'تعداد شب' in data.columns:
+        data['تعداد شب'] = (
+            data['تعداد شب']
+            .astype(str)
+            .str.replace(r'[^\d.]', '', regex=True)
+        )
+        data['تعداد شب'] = pd.to_numeric(data['تعداد شب'], errors='coerce')
+        data.loc[data['تعداد شب'] > 1000, 'تعداد شب'] = np.nan
+    else:
+        st.warning("Column 'تعداد شب' not found in the data.")
+
+    # ----------------------------------------------------
+    # Convert 'ارزش معامله' to numeric
+    # ----------------------------------------------------
+    if 'ارزش معامله' in data.columns:
+        data['ارزش معامله'] = pd.to_numeric(data['ارزش معامله'], errors='coerce')
+    else:
+        st.warning("Column 'ارزش معامله' not found in the data.")
+
+    # ----------------------------------------------------
+    # Extract VIP Status
+    # ----------------------------------------------------
+    data['VIP Status'] = extract_vip_status(data.get('نام خانوادگی شخص معامله', ''))
+
+    # ----------------------------------------------------
+    # Extract 'Complex' from 'عنوان محصول'
+    # ----------------------------------------------------
+    data['عنوان محصول'] = data.get('عنوان محصول', '').fillna('').astype(str)
+
+    def extract_complex(text):
+        mapping = {
+            r'\bمیرداماد\b': 'میرداماد',
+            r'\bپارک وی\b': 'پارک وی',
+            r'\bولنجک\b': 'ولنجک',
+            r'\bبهشتی\b': 'بهشتی',
+            r'\bجردن\b': 'جردن',
+            r'\bمرزداران\b': 'مرزداران',
+            r'\bاقدسیه\b': 'اقدسیه',
+            r'\bجمهوری\b': 'جمهوری',
+            r'\bکشاورز\b': 'کشاورز',
+            r'\bترنج\b': 'ترنج',
+            r'\bویلا\b': 'ویلا',
+            r'\bونک\b': 'ونک',
+            r'\bکوروش\b': 'کوروش',
+            r'\bشریعتی\b': 'شریعتی',
+            r'\bولیعصر\b': 'ولیعصر',
+            r'\bوزرا\b': 'وزرا'
+        }
+        for pattern, name in mapping.items():
+            if re.search(pattern, text):
+                return name
+        return 'نامشخص'
+
+    data['Complex'] = data['عنوان محصول'].apply(extract_complex)
+
+    # ----------------------------------------------------
+    # Extract BlackList Status
+    # ----------------------------------------------------
+    data['BlackList Status'] = extract_blacklist_status(
+        data.get('نام خانوادگی شخص معامله', '')
+    )
+
+    # ----------------------------------------------------
+    # KEEP ONLY rows with 'عنوان محصول' including special words
+    # ----------------------------------------------------
+    if 'عنوان محصول' in data.columns:
+        data = data[
+            ~data['عنوان محصول']
+            .astype(str)
+            .str.strip()
+            .isin(["0"])
+        ]
+        data = data[
+            data['عنوان محصول']
+            .str.contains(r'خودرو|صبحانه|نفر اضافه', regex=True, na=False)
+        ]
+    else:
+        st.warning("Column 'عنوان محصول' not found in the data.")
+
+    return data
+
 
 # Function to calculate RFM
 
 @st.cache_data
 def calculate_rfm(data, today=None):
-    # Divide 'ارزش معامله' by 10 as per the new requirement
+    # Divide 'ارزش معامله' by 10 to get Tooman instead of Rial
     data['ارزش معامله'] = data['ارزش معامله'] / 10
 
     # Filter for successful deals
@@ -796,23 +453,42 @@ def calculate_rfm(data, today=None):
     # Drop the extra 'کد دیدار شخص معامله' column
     rfm_data.drop(columns=['کد دیدار شخص معامله'], inplace=True)
 
-    # -------------------- New Code to Add Favorite Product and Last Product --------------------
+    rfm_data.rename(columns={
+        'تاریخ ورود': 'تاریخ ورود آخرین رزرو',
+        'تاریخ خروج': 'تاریخ خروج آخرین رزرو',
+    }, inplace=True)
 
+    
     # Favorite Product: Product with the most successful deals per customer
-    favorite_product = successful_deals[successful_deals['عنوان محصول'].notna()]
-    favorite_product = favorite_product.groupby(['کد دیدار شخص معامله', 'عنوان محصول']).size().reset_index(name='DealCount')
+
+    favorite_product = successful_deals[successful_deals['Complex'].notna()]
+    favorite_product = favorite_product.groupby(['کد دیدار شخص معامله', 'Complex']).size().reset_index(name='DealCount')
     favorite_product = favorite_product.sort_values(['کد دیدار شخص معامله', 'DealCount'], ascending=[True, False])
     favorite_product = favorite_product.groupby('کد دیدار شخص معامله').first().reset_index()
-    favorite_product = favorite_product[['کد دیدار شخص معامله', 'عنوان محصول']].rename(columns={'عنوان محصول': 'Favorite Product'})
+    favorite_product = favorite_product[['کد دیدار شخص معامله', 'Complex']].rename(columns={'Complex': 'مجتمع محبوب'})
 
     # Last Product: Product from the customer's last successful deal
     last_product = successful_deals.sort_values('تاریخ انجام معامله').groupby('کد دیدار شخص معامله').tail(1)
-    last_product = last_product[['کد دیدار شخص معامله', 'عنوان محصول']].rename(columns={'عنوان محصول': 'Last Product'})
+    last_product = last_product[['کد دیدار شخص معامله', 'Complex']].rename(columns={'Complex': 'آخرین مجتمع'})
+
+
+    favorite_type = successful_deals[successful_deals['عنوان محصول'].notna()]
+    favorite_type = favorite_type.groupby(['کد دیدار شخص معامله', 'عنوان محصول']).size().reset_index(name='DealCount')
+    favorite_type = favorite_type.sort_values(['کد دیدار شخص معامله', 'DealCount'], ascending=[True, False])
+    favorite_type = favorite_type.groupby('کد دیدار شخص معامله').first().reset_index()
+    favorite_type = favorite_type[['کد دیدار شخص معامله', 'عنوان محصول']].rename(columns={'عنوان محصول': 'تیپ محبوب'})
+
+    # Last Product: Product from the customer's last successful deal
+    last_type = successful_deals.sort_values('تاریخ انجام معامله').groupby('کد دیدار شخص معامله').tail(1)
+    last_type = last_type[['کد دیدار شخص معامله', 'عنوان محصول']].rename(columns={'عنوان محصول': 'آخرین تیپ'})
 
     # Merge Favorite Product and Last Product into rfm_data
     rfm_data = rfm_data.merge(favorite_product, left_on='Customer ID', right_on='کد دیدار شخص معامله', how='left')
     rfm_data = rfm_data.merge(last_product, left_on='Customer ID', right_on='کد دیدار شخص معامله', how='left')
+    rfm_data.drop(columns=['کد دیدار شخص معامله_x', 'کد دیدار شخص معامله_y'], inplace=True)
 
+    rfm_data = rfm_data.merge(favorite_type, left_on='Customer ID', right_on='کد دیدار شخص معامله', how='left')
+    rfm_data = rfm_data.merge(last_type, left_on='Customer ID', right_on='کد دیدار شخص معامله', how='left')
     # Drop the extra 'کد دیدار شخص معامله' columns
     rfm_data.drop(columns=['کد دیدار شخص معامله_x', 'کد دیدار شخص معامله_y'], inplace=True)
 
@@ -820,104 +496,108 @@ def calculate_rfm(data, today=None):
 
     return rfm_data
 
-# Function for RFM segmentation
-@st.cache_data
-def rfm_segmentation(data):
-    data = data[(data['Monetary'] > 0) & (data['Customer ID'] != 0)]
-    # Define R, F, M thresholds based on quantiles to categorize scores
-    buckets = data[['Recency', 'Frequency', 'Monetary']].quantile([1/3, 2/3]).to_dict()
-
-    # Define the RFM segmentation function
-    def rfm_segment(row):
-        # Recency scoring
-        if row['Recency'] >= 296:
-            r_score = 1
-        elif row['Recency'] >= 185:
-            r_score = 2
-        elif row['Recency'] >= 76:
-            r_score = 3
-        else:
-            r_score = 4
-
-        # Frequency scoring based on quantiles
-        if row['Frequency'] <= buckets['Frequency'][1/3]:
-            f_score = 1
-        elif row['Frequency'] <= buckets['Frequency'][2/3]:
-            f_score = 2
-        else:
-            f_score = 3
-
-        # Monetary scoring based on quantiles
-        if row['Monetary'] <= buckets['Monetary'][1/3]:
-            m_score = 1
-        elif row['Monetary'] <= buckets['Monetary'][2/3]:
-            m_score = 2
-        else:
-            m_score = 3
-
-        return f"{r_score}{f_score}{m_score}"
-
-    # Apply the segmentation function to categorize customers into RFM segments
-    data['RFM_segment'] = data.apply(rfm_segment, axis=1)
-
-    # Define segment labels based on RFM combinations
-    segment_labels = {
-        '111': 'Churned',
-        '112': 'Churned',
-        '113': 'Lost Big Spenders',
-        '121': 'Churned',
-        '122': 'Churned',
-        '123': 'Lost Big Spenders',
-        '131': 'Hibernating',
-        '132': 'Big Loss',
-        '133': 'Big Loss',
-        '211': 'Low Value',
-        '212': 'At Risk',
-        '213': 'At Risk',
-        '221': 'Low Value',
-        '222': 'At Risk',
-        '223': 'At Risk',
-        '231': 'At Risk',
-        '232': 'At Risk',
-        '233': 'At Risk',
-        '311': 'Low Value',
-        '312': 'Promising',
-        '313': 'Big Spenders',
-        '321': 'Promising',
-        '322': 'Promising',
-        '323': 'Promising',
-        '331': 'Loyal Customers',
-        '332': 'Loyal Customers',
-        '333': 'Loyal Customers',
-        '411': 'Promising',
-        '412': 'Promising',
-        '413': 'Big Spenders',
-        '421': 'Price Sensitive',
-        '422': 'Loyal Customers',
-        '423': 'Loyal Customers',
-        '431': 'Price Sensitive',
-        '432': 'Loyal Customers',
-        '433': 'Champions'
-    }
-
-    # Map the segment label to each RFM segment
-    data['RFM_segment_label'] = data['RFM_segment'].map(segment_labels)
-    return data
-
-# Function to normalize RFM values for plotting
 @st.cache_data
 def normalize_rfm(data):
+    df = data.copy()
     scaler = MinMaxScaler()
-
-    # For Recency, invert the scale so that higher is better (more recent purchase)
-    data['Recency_norm'] = scaler.fit_transform(data[['Recency']])
-    data['Recency_norm'] = 1 - data['Recency_norm']  # Invert Recency scores
-
-    # Normalize Frequency and Monetary normally
-    data[['Frequency_norm', 'Monetary_norm']] = scaler.fit_transform(
-        data[['Frequency', 'Monetary']]
+    df[['Recency_norm','Frequency_norm','Monetary_norm','Total_Nights_norm']] = scaler.fit_transform(
+        df[['Recency','Frequency','Monetary','Total Nights']]
     )
-    return data
+    df['Recency_norm'] = 1 - df['Recency_norm']
+    return df
+
+@st.cache_data
+def rfm_segmentation(data):
+    df = data.copy()
+    df = df[(df['Monetary'] > 0) &
+            (df['Frequency'] > 0) &
+            df['Customer ID'].notnull()].copy()
+
+    # 1) Compute average stay
+    df['average_stay'] = df['Total Nights'] / df['Frequency']
+
+    # 2) Compute days since last checkout (future/missing → 0)
+    today     = pd.to_datetime(datetime.now()).normalize()
+    exits     = pd.to_datetime(df['تاریخ خروج آخرین رزرو'], errors='coerce')
+    exit_days = (today - exits).dt.days.clip(lower=0)
+
+    # 3) Exclude top 1% outliers for quantile calcs
+    f_out = df['Frequency'].quantile(0.99)
+    m_out = df['Monetary'].quantile(0.99)
+    non_out = df[(df['Frequency'] <= f_out) & (df['Monetary'] <= m_out)]
+
+    # 4) Quantiles on non‑outliers
+    f_q20 = non_out['Frequency'].quantile(0.20)
+    f_q33 = non_out['Frequency'].quantile(0.33)
+    f_q50 = non_out['Frequency'].quantile(0.50)
+    f_q80 = non_out['Frequency'].quantile(0.80)
+    m_q33 = non_out['Monetary'].quantile(0.33)
+    m_q50 = non_out['Monetary'].quantile(0.50)
+    m_q80 = non_out['Monetary'].quantile(0.80)
+    m_q95 = non_out['Monetary'].quantile(0.95)
+    a_q33 = non_out['average_stay'].quantile(0.33)
+    a_q50 = non_out['average_stay'].quantile(0.50)
+    a_q80 = non_out['average_stay'].quantile(0.80)
+    a_q95 = non_out['average_stay'].quantile(0.95)
+    # 5) Static recency thresholds
+    NEW_DAYS   =  90
+    CHURN_DAYS = 365
+    At_Risk_DAYS = 180
+    # 6) Emoji map
+    emoji_map = {
+        'Champions':        '👑',
+        'Big Spender':      '💰',
+        'Loyal Customers':  '❤️',
+        'Curious Customers':'🧐',
+        'Potential':        '✨',
+        'Low Value':        '🗑️',
+        'Reliable Customers':'🔒'
+    }
+
+    def label_customer(row, exit_d):
+        R = row['Recency']
+        F = row['Frequency']
+        M = row['Monetary']
+        A = row['average_stay']
+
+        # —— Base cluster by F / M / A ——
+        if (F >= f_q80 and M >= m_q95):
+            base = 'Champions'
+        elif ((A >= a_q95 or F<=f_q20) and M >= m_q95):
+            base = 'Big Spender'
+        elif (F >= 5 and M >= m_q50):
+            base = 'Loyal Customers'
+        elif (F <= f_q50 and (A >= a_q50 or M >= m_q50)):
+            base = 'Curious Customers'
+        elif (F>=f_q80):
+            base = 'Reliable Customers'
+        elif (F > f_q50 or M > m_q50 or A > a_q50):
+            base = 'Potential'
+        else:
+            base = 'Low Value'
+
+        # —— Prefix by Recency & exit_days ——
+        if (R <= NEW_DAYS and F == 1):
+            prefix = 'New '
+        elif (R > CHURN_DAYS and exit_d > 0):
+            prefix = 'Lost '
+        elif (R > At_Risk_DAYS and R <= CHURN_DAYS and exit_d > NEW_DAYS):
+            prefix = 'At Risk '
+        else:
+            prefix = ''
+
+        emoji = emoji_map[base]
+        return f"{prefix}{emoji} {base}".strip()
+
+    # 7) Label every customer
+    labels = [
+        label_customer(row, ed)
+        for (_, row), ed in zip(df.iterrows(), exit_days)
+    ]
+    df['RFM_segment_label'] = labels
+    df['RFM_segment']       = labels
+    return df
+
 
 # Global functions for data conversion (moved outside conditional blocks)
 @st.cache_data
@@ -935,16 +615,33 @@ def convert_df_to_excel(df):
 def main():
     # Set page config
     st.set_page_config(
-        page_title="داشبورد سگمنت‌بندی مشتریان تهران‌مبله",
+        page_title="داشبورد تحلیل فروش و مشتری تهران‌مبله",
         page_icon="📊",
         layout="wide",
     )
+    st.markdown("""
+    <style>
+    /* Apply Tahoma only, with fallback to sans-serif */
+    * {
+        font-family: Tahoma, sans-serif !important;
+    }
+
+    /* Ensure sidebar elements inherit Tahoma */
+    .css-1d391kg, .css-1v0mbdj, .css-1cpxqw2, .stRadio, .stSidebar, .stText, .stMarkdown, .st-b8 {
+        font-family: Tahoma, sans-serif !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 
     # Title
-    st.title("Customer Segmentation Dashboard - Tehran Moble")
+    st.title("Sales Intelligence Dashboard - TehranMoble")
 
     # File uploader
-    st.sidebar.header("Upload your deals Excel file")
+    st.sidebar.markdown("""
+    <h2 style="font-family: Tahoma;">فایل خروجی دیدار را آپلود کنید</h2>
+""", unsafe_allow_html=True)
+
     uploaded_file = st.sidebar.file_uploader("Choose an Excel file", type=["xlsx"])
 
     if uploaded_file is not None:
@@ -969,8 +666,8 @@ def main():
         
             
             # ------------------ Navigation ------------------
-            st.sidebar.header("Navigation")
-            page = st.sidebar.radio("Go to", ['General', 'Churned Analysis','Compare RFM Segments Over Time', 'Portfolio Analysis', 'Seller Analysis', 'Sale Channel Analysis', 'VIP Analysis','Customer Batch Edit', 'Customer Inquiry Module','Arrival Analysis'])
+            st.sidebar.header("لیست صفحات")
+            page = st.sidebar.radio("برو به", ['تحلیل مشتری','سنجش عملکرد کمپین', 'تحلیل سبد خرید مشتری', 'تحلیل فروشنده', 'تحلیل کانال‌های فروش', 'استعلام اطلاعات مشتری','تحلیل چک‌این'])
 
             filtered_data = data.copy()
 
@@ -990,7 +687,7 @@ def main():
             rfm_data = calculate_rfm(data)
             rfm_data = rfm_segmentation(rfm_data)
             rfm_data = normalize_rfm(rfm_data)
-            data_load_state.text('Loading and processing data...done!')
+            data_load_state.text(' ')
 
             stay_options = rfm_data['Is Monthly'].dropna().unique().tolist()
             stay_options.sort()
@@ -1024,20 +721,20 @@ def main():
 ###############################################################################
 # REPLACEMENT CODE FOR THE 'General' PAGE ONLY
 ###############################################################################
-            if page == 'General':
-
+            if page == 'تحلیل مشتری':
+                st.subheader("تحلیل و بخش‌بندی مشتری بر اساس شاخص‌های فروش ")
                 # -- 1) Prepare an empty DataFrame for potential filtered data
                 rfm_data_filtered_plots = pd.DataFrame()
 
                 # -- 2) VIP Filter
                 vip_options_page = sorted(rfm_data_filtered_global['VIP Status'].unique())
-                select_all_vips_page = st.checkbox("Select all VIP statuses", value=True, key='select_all_vips_plots')
+                select_all_vips_page = st.checkbox("VIP انتخاب تمام وضعیت‌های", value=True, key='select_all_vips_plots')
 
                 if select_all_vips_page:
                     selected_vips_plots = vip_options_page
                 else:
                     selected_vips_plots = st.multiselect(
-                        "Select VIP Status:",
+                       "VIP انتخاب وضعیت :",
                         options=vip_options_page,
                         default=[],  # empty if user doesn’t pick
                         key='vips_multiselect_plots'
@@ -1054,13 +751,13 @@ def main():
                     data['BlackList Status'] = extract_blacklist_status(data['نام خانوادگی شخص معامله'])
 
                 blacklist_options_page = sorted(data['BlackList Status'].unique())
-                select_all_blacklist_page = st.checkbox("Select all Black List statuses", value=True, key='select_all_blacklist_portfolio')
+                select_all_blacklist_page = st.checkbox("انتخاب تمام وضعیت‌های بلک لیست", value=True, key='select_all_blacklist_page')
 
                 if select_all_blacklist_page:
                     selected_blacklist_page = blacklist_options_page
                 else:
                     selected_blacklist_page = st.multiselect(
-                        "Select Black List Status:",
+                        ":وضعیت بلک لیست مورد نظر را انتخاب کنید",
                         options=blacklist_options_page,
                         default=[],
                         key='blacklist_multiselect_portfolio'
@@ -1075,67 +772,60 @@ def main():
                     rfm_data_filtered_global['Customer ID'].isin(data_for_general['کد دیدار شخص معامله'])
                 ]
 
-                # -- 4) Segment Filter
-                segment_options = sorted(rfm_data_filtered_global['RFM_segment_label'].unique())
-                select_all_segments = st.checkbox("Select all segments", value=True, key='select_all_segments_plots')
+                
+                
 
-                if select_all_segments:
-                    selected_segments_plots = segment_options
-                else:
-                    selected_segments_plots = st.multiselect(
-                        "Select RFM Segments:",
-                        options=segment_options,
-                        default=[],
-                        key='segments_multiselect_plots'
-                    )
-
-                if not select_all_segments and not selected_segments_plots:
-                    selected_segments_plots = segment_options
-
-                if selected_segments_plots:
-                    rfm_data_filtered_plots = rfm_data_filtered_global[
-                        rfm_data_filtered_global['RFM_segment_label'].isin(selected_segments_plots)
-                    ]
-                else:
-                    st.warning("No segments selected. Please select at least one segment.")
-
-                if rfm_data_filtered_plots.empty:
+                if rfm_data_filtered_global.empty:
                     st.warning("No data available for the selected segments/VIP/Blacklist filters.")
                 else:
                     # Create 4 tabs
-                    tab4, tab1, tab2, tab3 = st.tabs(["Customer Segmentation Data", "Pie Chart", "3D Scatter Plot", "Histograms"])
-
-                    # ------------------------- Tab 1: Pie Chart -------------------------
+                    tab4, tab_freq, tab1, tab2, tab3  = st.tabs(["دیتای بخش‌بندی مشتریان","جدول فراوانی", "نمودار دایره‌ای", "نمودار پراکندگی سه بعدی", "هیستوگرام‌ها"])
+                    # ----- Plot‐only segment filter (tabs 1–3) -----
+                    # ─── Frequency‐table tab ───
+                    
+                    # --- Tab 1: Pie Chart + its own segment filter ---
                     with tab1:
-                        st.subheader("Distribution of RFM Segments")
-                        rfm_segment_counts = rfm_data_filtered_plots['RFM_segment_label'].value_counts().reset_index()
-                        rfm_segment_counts.columns = ['RFM_segment_label', 'Count']
-
-                        fig_pie = px.pie(
-                            rfm_segment_counts,
-                            names='RFM_segment_label',
-                            values='Count',
-                            color='RFM_segment_label',
-                            color_discrete_map=COLOR_MAP,
-                            hole=0.4
+                        st.subheader("توزیع بخش‌های مشتریان")
+                        # Plot‐only segment filter
+                        segment_options = sorted(rfm_data_filtered_global['RFM_segment_label'].unique())
+                        select_all_segments = st.checkbox(
+                            "Select all segments",
+                            value=True,
+                            key='select_all_segments_plots'
                         )
-                        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-                        st.plotly_chart(fig_pie)
+                        if select_all_segments:
+                            selected_segments = segment_options
+                        else:
+                            selected_segments = st.multiselect(
+                                "Select RFM Segments:",
+                                options=segment_options,
+                                default=segment_options,
+                                key='segments_multiselect_plots'
+                            )
+                        # slice for plots
+                        rfm_plots = rfm_data_filtered_global[
+                            rfm_data_filtered_global['RFM_segment_label'].isin(selected_segments)
+                        ]
+                        # Pie
+                        counts = rfm_plots['RFM_segment_label'].value_counts().reset_index()
+                        counts.columns = ['RFM_segment_label','Count']
+                        fig = px.pie(
+                            counts, names='RFM_segment_label', values='Count',
+                            color='RFM_segment_label', color_discrete_map=COLOR_MAP, hole=0.4
+                        )
+                        fig.update_traces(textposition='inside', textinfo='percent+label')
+                        st.plotly_chart(fig)
 
-                    # ------------------------- Tab 2: 3D Scatter Plot -------------------
+                    # --- Tab 2: 3D scatter, reusing rfm_plots ---
                     with tab2:
-                        st.subheader("3D Scatter Plot of RFM Segments")
-                        fig_3d = px.scatter_3d(
-                            rfm_data_filtered_plots,
-                            x='Recency_norm',
-                            y='Frequency_norm',
-                            z='Monetary_norm',
-                            color='RFM_segment_label',
-                            color_discrete_map=COLOR_MAP,
-                            hover_data=['Customer ID', 'First Name', 'Last Name', 'VIP Status'],
-                            title='RFM Segments (Normalized Space)'
+                        st.subheader("نمودار پراکندگی سه بعدی متریک‌های بخش‌بندی")
+                        fig3d = px.scatter_3d(
+                            rfm_plots,
+                            x='Recency_norm', y='Frequency_norm', z='Monetary_norm',
+                            color='RFM_segment_label', color_discrete_map=COLOR_MAP,
+                            hover_data=['Customer ID','First Name','Last Name','VIP Status']
                         )
-                        fig_3d.update_layout(
+                        fig3d.update_layout(
                             scene=dict(
                                 xaxis_title='Recency (Higher=Better)',
                                 yaxis_title='Frequency',
@@ -1143,49 +833,36 @@ def main():
                             ),
                             legend_title='RFM Segments'
                         )
-                        st.plotly_chart(fig_3d)
+                        st.plotly_chart(fig3d)
 
-                    # ------------------------- Tab 3: Histograms -------------------------
+                    # --- Tab 3: Histograms, reusing rfm_plots ---
                     with tab3:
-                        st.subheader("RFM Metrics Distribution")
-
-                        # Recency Histogram
-                        fig_recency = px.histogram(
-                            rfm_data_filtered_plots,
-                            x='Recency',
-                            nbins=50,
+                        st.subheader("توزیع متریک‌های بخش‌بندی مشتریان")
+                        st.plotly_chart(px.histogram(
+                            rfm_plots, x='Recency', nbins=50,
                             title='Recency Distribution',
-                            color='RFM_segment_label',
-                            color_discrete_map=COLOR_MAP
-                        )
-                        st.plotly_chart(fig_recency)
-
-                        # Frequency Histogram
-                        fig_frequency = px.histogram(
-                            rfm_data_filtered_plots,
-                            x='Frequency',
-                            nbins=50,
+                            color='RFM_segment_label', color_discrete_map=COLOR_MAP
+                        ))
+                        st.plotly_chart(px.histogram(
+                            rfm_plots, x='Frequency', nbins=50,
                             title='Frequency Distribution',
-                            color='RFM_segment_label',
-                            color_discrete_map=COLOR_MAP
-                        )
-                        st.plotly_chart(fig_frequency)
-
-                        # Monetary Histogram
-                        fig_monetary = px.histogram(
-                            rfm_data_filtered_plots,
-                            x='Monetary',
-                            nbins=50,
+                            color='RFM_segment_label', color_discrete_map=COLOR_MAP
+                        ))
+                        st.plotly_chart(px.histogram(
+                            rfm_plots, x='Monetary', nbins=50,
                             title='Monetary Value Distribution',
-                            labels={'Monetary': 'Monetary Value'},
-                            color='RFM_segment_label',
-                            color_discrete_map=COLOR_MAP
-                        )
-                        st.plotly_chart(fig_monetary)
+                            labels={'Monetary':'Monetary Value'},
+                            color='RFM_segment_label', color_discrete_map=COLOR_MAP
+                        ))
 
-                    # ------------------ Tab 4: Customer Segmentation Data ------------------
+                    with tab_freq:
+                        st.subheader("جدول فراوانی مشتریان بر اساس بخش‌بندی RFM")
+                        freq_df = rfm_plots['RFM_segment_label'].value_counts().reset_index()
+                        freq_df.columns = ['بخش‌بندی RFM', 'تعداد مشتریان']
+                        st.write(freq_df)
+
                     with tab4:
-                        st.subheader("Customer Segmentation Data")
+                        st.subheader("دیتای بخش‌بندی مشتریان")
 
                         @st.cache_data
                         def get_filter_options(data, rfm_data):
@@ -1196,99 +873,85 @@ def main():
 
                         product_options, stay_options, current_status_options = get_filter_options(data, rfm_data)
 
-                        # ~~~~~~~~~~~~~ Additional function to add new metrics ~~~~~~~~~~~~~
-                        @st.cache_data
-                        def add_additional_metrics(df_in):
-                            """
-                            Demonstration placeholder for:
-                            - Probability_of_Churn (via a mock logistic regression or formula)
-                            - Customer_Lifespan
-                            - CLTV
-                            - CRR (1 - churn probability for illustration)
-                            In real usage, you'd train a model on actual churn labels.
-                            """
-
-                            # If empty or missing columns, return as-is
-                            if df_in.empty or 'Recency' not in df_in.columns:
-                                return df_in
-
-                            # Copy to avoid mutating original
-                            df = df_in.copy()
-
-                            # ~~~ STEP 1: Create a toy churn probability ~~~
-                            # For demonstration: Probability_of_Churn = logistic function of (Recency, Frequency, Monetary)
-                            # In a real scenario, you’d load a trained model or actually train one offline.
-                            import numpy as np
-                            import pandas as pd
-                            from sklearn.linear_model import LogisticRegression
-
-                            # We'll do a quick synthetic approach:
-                            #   - Generate a mock binary label based on Recency>200 => "churned"
-                            #   - Then train a logistic model for demonstration
-                            df['churn_label'] = np.where(df['Recency'] > 200, 1, 0)
-
-                            # Prepare features
-                            X = df[['Recency', 'Frequency', 'Monetary']].fillna(0)
-                            y = df['churn_label']
-
-                            if len(X['Recency'].unique()) > 1:
-                                # Fit a simple logistic regression
-                                model = LogisticRegression()
-                                model.fit(X, y)
-                                churn_probs = model.predict_proba(X)[:, 1]
-                            else:
-                                # If no variance in Recency or data is too small, fallback
-                                churn_probs = np.repeat(0.5, len(df))
-
-                            df['Probability_of_Churn'] = churn_probs
-
-                            # ~~~ STEP 2: Define Customer_Lifespan ~~~
-                            # A naive approach: we’ll define it as 1 / (churn_prob), clipped.
-                            df['Customer_Lifespan'] = np.where(
-                                df['Probability_of_Churn'] < 0.01,
-                                570,  # big cap for near-zero churn prob
-                                1.0 / df['Probability_of_Churn']
-                            )
-
-                            # ~~~ STEP 3: CLTV ~~~
-                            # For demonstration: CLTV = Monetary * Frequency * Customer_Lifespan
-                            df['CLTV'] = df['Monetary'] * df['Frequency'] * df['Customer_Lifespan']
-
-                            # ~~~ STEP 4: CRR ~~~
-                            # Another naive approach: CRR = 1 - Probability_of_Churn
-                            df['CRR'] = 1 - df['Probability_of_Churn']
-
-                            # drop the synthetic churn label
-                            df.drop(columns=['churn_label'], inplace=True, errors='ignore')
-
-                            return df
-
+                        
                         # The DataFrame we’ll display in the table:
                         rfm_data_filtered_table = rfm_data_filtered_global.copy()
 
-                        # ------------------ Product Filter ------------------
-                        st.subheader("Filter Table by Products")
-                        select_all_products_table = st.checkbox("Select all products", value=True, key='select_all_products_table')
+                        
+                        # Complex filter
+                        complex_options = sorted(data['Complex'].dropna().unique())
+                        select_all_complexes_table = st.checkbox("انتخاب تمام مجتمع‌ها", value=True, key='select_all_complexes_table')
+
+                        if select_all_complexes_table:
+                            selected_complexes = complex_options
+                        else:
+                            selected_complexes = st.multiselect(
+                                "مجتمع مورد نظر را انتخاب کنید:",
+                                options=complex_options,
+                                default=[],
+                                key='complexes_multiselect_table'
+                            )
+
+                        if not select_all_complexes_table and not selected_complexes:
+                            selected_complexes = complex_options
+
+                        # Filter by selected complexes
+                        cust_ids_with_complexes = data[data['Complex'].isin(selected_complexes)]['کد دیدار شخص معامله'].unique()
+                        rfm_data_filtered_table = rfm_data_filtered_table[rfm_data_filtered_table['Customer ID'].isin(cust_ids_with_complexes)]
+
+                        # Restrict product options based on selected complexes
+                        product_options_table = sorted(
+                            data[data['Complex'].isin(selected_complexes)]['عنوان محصول']
+                                .dropna()
+                                .unique()
+                                .tolist()
+                        )
+
+                        # Product filter (updated)
+                        select_all_products_table = st.checkbox("انتخاب تمام تیپ‌ها", value=True, key='select_all_products_table')
 
                         if select_all_products_table:
-                            selected_products_table = product_options
+                            selected_products_table = product_options_table
                         else:
                             selected_products_table = st.multiselect(
-                                "Select products (عنوان محصول):",
-                                options=product_options,
+                                "تیپ مورد نظر را انتخاب کنید:",
+                                options=product_options_table,
                                 default=[],
                                 key='products_multiselect_table'
                             )
 
-                        if selected_products_table:
-                            cust_ids_with_products = data[data['عنوان محصول'].isin(selected_products_table)]['کد دیدار شخص معامله'].unique()
-                            rfm_data_filtered_table = rfm_data_filtered_table[rfm_data_filtered_table['Customer ID'].isin(cust_ids_with_products)]
-                        else:
-                            st.warning("No products selected. Displaying all products.")
+                        if not select_all_products_table and not selected_products_table:
+                            selected_products_table = product_options_table
 
+                        # Filter by selected products
+                        cust_ids_with_products = data[data['عنوان محصول'].isin(selected_products_table)]['کد دیدار شخص معامله'].unique()
+                        rfm_data_filtered_table = rfm_data_filtered_table[rfm_data_filtered_table['Customer ID'].isin(cust_ids_with_products)]
+                        
+                        segment_options_table = sorted(rfm_data_filtered_table['RFM_segment_label'].unique())
+                        select_all_segments_table = st.checkbox(
+                            "انتخاب تمام بخش‌ها برای جدول",
+                            value=True,
+                            key='select_all_segments_table'
+                        )
+                        if select_all_segments_table:
+                            selected_segments_table = segment_options_table
+                        else:
+                            selected_segments_table = st.multiselect(
+                                "بخش‌های RFM را برای جدول انتخاب کنید:",
+                                options=segment_options_table,
+                                default=[],
+                                key='segments_multiselect_table'
+                            )
+                        if not selected_segments_table:
+                            selected_segments_table = segment_options_table
+
+                        # Apply to the table & downloads only
+                        rfm_data_filtered_table = rfm_data_filtered_table[
+                            rfm_data_filtered_table['RFM_segment_label'].isin(selected_segments_table)
+                        ]
                         # ------------------ "Monthly" Filter (Is Monthly) ------------------
                         min_nights = st.number_input(
-                            "Enter minimum number of nights for monthly guests:",
+                            "مینیمم میانگین اقامت برای اینکه مهمان ماهانه محسوب شود را وارد کنید:",
                             min_value=0, value=15, step=1, key='min_nights_filter'
                         )
                         # Recompute 'Is Monthly' with chosen threshold
@@ -1297,7 +960,7 @@ def main():
                         )
 
                         select_all_staying_table = st.checkbox(
-                            "Select all guest types (Monthly or not)", 
+                            "هم ماهانه هم غیر ماهانه", 
                             value=True, 
                             key='select_all_staying_table'
                         )
@@ -1306,14 +969,14 @@ def main():
                             selected_staying_table = [True, False]  # since 'Is Monthly' is boolean
                         else:
                             # user picks among True or False
-                            staying_options_label = ["Monthly Guests","Non-Monthly Guests"]
+                            staying_options_label = ["مهمانان ماهانه","مهمانان غیر ماهانه"]
                             selected_bool_values = st.multiselect(
-                                "Select guest type (monthly or not):",
+                                "نوع مهمان را انتخاب کنید:",
                                 options=staying_options_label,
                                 default=[]
                             )
                             # convert to booleans
-                            mapping = {"Monthly Guests": True, "Non-Monthly Guests": False}
+                            mapping = {"مهمانان ماهانه": True, "مهمانان غیر ماهانه": False}
                             selected_staying_table = [mapping[val] for val in selected_bool_values]
 
                         # If user picks nothing => show all
@@ -1324,7 +987,7 @@ def main():
 
                         # ------------------ "Is staying" Filter ------------------
                         select_all_current_status_table = st.checkbox(
-                            "Select all current status (currently staying or not)",
+                            "هم مقیم هم غیرمقیم",
                             value=True,
                             key='select_all_current_status_table'
                         )
@@ -1333,13 +996,13 @@ def main():
                             selected_current_status_table = [True, False]
                         else:
                             # user picks among True or False
-                            status_options_label = ["Currently Staying","Not Staying"]
+                            status_options_label = ["مقیم","غیرمقیم"]
                             chosen_status = st.multiselect(
-                                "Select current status (currently staying or not):",
+                                "انتخاب وضعیت اقامت فعلی",
                                 options=status_options_label,
                                 default=[]
                             )
-                            mapping_status = {"Currently Staying": True, "Not Staying": False}
+                            mapping_status = {"مقیم": True, "غیرمقیم": False}
                             selected_current_status_table = [mapping_status[val] for val in chosen_status]
 
                         if not selected_current_status_table:
@@ -1350,15 +1013,13 @@ def main():
                         ]
 
                         # ~~~~~~~~~~~~~ Add the additional metrics columns here ~~~~~~~~~~~~~
-                        rfm_data_filtered_table = add_additional_metrics(rfm_data_filtered_table)
 
                         # Show final table
                         st.write(rfm_data_filtered_table[[
                             'Customer ID', 'First Name', 'Last Name', 'VIP Status', 'Phone Number',
-                            'Recency', 'Frequency', 'Monetary', 'average stay', 'Is Monthly', 
-                            'Is staying', 'Favorite Product', 'Last Product', 'RFM_segment_label',
-                            # New columns:
-                            'Probability_of_Churn', 'Customer_Lifespan', 'CLTV', 'CRR'
+                            'Recency', 'Frequency', 'Monetary', 'Total Nights','average stay', 'Is Monthly', 
+                            'Is staying', 'مجتمع محبوب', 'آخرین مجتمع','تیپ محبوب','آخرین تیپ', 'RFM_segment_label',
+
                         ]])
 
                         # Download buttons
@@ -1388,24 +1049,22 @@ def main():
 
             # elif page == 'Price Elasticity Analysis':
             #     price_elasticity_page(data)
-            elif page == 'Churned Analysis':
-                churned_analysis_page(rfm_data) 
-            elif page == 'Compare RFM Segments Over Time':
+            elif page == 'سنجش عملکرد کمپین':
 
 
                 # ------------------ Compare RFM Segments Over Time ------------------
 
-                st.subheader("Compare RFM Segments Over Time")
+                st.subheader("سنجش عملکرد کمپین از طریق بخش‌بندی مشتریان ")
 
                 # VIP Filter for this page
                 vip_options_page = sorted(rfm_data['VIP Status'].unique())
-                select_all_vips_page = st.checkbox("Select all VIP statuses for comparison", value=True, key='select_all_vips_comparison')
+                select_all_vips_page = st.checkbox("VIP انتخاب تمام دسته‌های ", value=True, key='select_all_vips_comparison')
 
                 if select_all_vips_page:
                     selected_vips_comparison = vip_options_page
                 else:
                     selected_vips_comparison = st.multiselect(
-                        "Select VIP Status:",
+                        "انتخاب کنید VIP سطح:",
                         options=vip_options_page,
                         default=[],
                         key='vips_multiselect_comparison'
@@ -1414,11 +1073,11 @@ def main():
                 # Use a form to prevent automatic reruns
                 with st.form(key='comparison_form'):
                     # Date Input
-                    comparison_date = st.date_input("Select a date for comparison", value=datetime.today())
+                    comparison_date = st.date_input("یک تاریخ را برای مقایسه انتخاب کنید", value=datetime.today())
 
                     # Ensure that the date is not in the future
                     if comparison_date > datetime.today().date():
-                        st.error("The comparison date cannot be in the future.")
+                        st.error("بازه مقایسه تاریخ نمی‌تواند در آینده باشد")
                         submit_button = st.form_submit_button(label='Submit')
                     else:
                         # Get list of unique segments
@@ -1426,19 +1085,19 @@ def main():
 
                         col1, col2 = st.columns(2)
                         with col1:
-                            from_segment = st.selectbox("Select 'FROM' Segment (Before)", options=segment_options)
+                            from_segment = st.selectbox("...بررسی تغییرات از سگمنت", options=segment_options)
                         with col2:
-                            to_segment = st.selectbox("Select 'TO' Segment (After)", options=segment_options)
+                            to_segment = st.selectbox("...به سگمنت", options=segment_options)
 
                         # Show Results button
-                        submit_button = st.form_submit_button(label='Show Results')
+                        submit_button = st.form_submit_button(label='مشاهده نتایج')
 
                 if 'submit_button' in locals() and submit_button:
                     # Filter data before the selected date
                     data_before_date = data[data['تاریخ انجام معامله'] <= pd.to_datetime(comparison_date)]
 
                     if data_before_date.empty:
-                        st.warning("No data available before the selected date.")
+                        st.warning("هیچ دیتایی در بازه تاریخی انتخاب شده موجود نیست")
                     else:
                         # Calculate RFM1 (RFM before the selected date)
                         rfm_data1 = calculate_rfm(data_before_date, today=comparison_date)
@@ -1459,7 +1118,7 @@ def main():
 
                         # Handle the cases
                         if from_segment == 'All' and to_segment == 'All':
-                            st.error("Please select at least one segment in 'FROM' or 'TO'.")
+                            st.error("لااقل یک سگمنت مشخص برای مقصد یا مبدا انتخاب کنید")
                         else:
                             if from_segment != 'All':
                                 comparison_df = comparison_df[comparison_df['RFM_segment_label_RFM1'] == from_segment]
@@ -1467,7 +1126,7 @@ def main():
                                 comparison_df = comparison_df[comparison_df['RFM_segment_label_RFM2'] == to_segment]
 
                             if comparison_df.empty:
-                                st.warning("No customers found for the selected segment transitions and VIP statuses.")
+                                st.warning("هیچ مشتری‌ای این انتقال سگمنتی را نداشته است")
                             else:
                                 # Display count and bar chart
                                 if from_segment!='All':
@@ -1477,7 +1136,7 @@ def main():
                                     counts = comparison_df['RFM_segment_label_RFM1'].value_counts().reset_index()
                                     counts.columns = ['RFM_segment_label_RFM1', 'Count']
 
-                                st.write(f"Number of customers matching the criteria: **{len(comparison_df)}**")
+                                st.write(f"تعداد مشتریانی که در این انتقال بوده‌اند: **{len(comparison_df)}**")
 
                                 if from_segment!='All':
                                     fig = px.bar(
@@ -1487,7 +1146,7 @@ def main():
                                         color='RFM_segment_label_RFM2',
                                         color_discrete_map=COLOR_MAP,
                                         text='Count',
-                                        labels={'RFM_segment_label_RFM2': 'Segment After that date', 'Count': 'Number of Customers'}
+                                        labels={'RFM_segment_label_RFM2': 'سگمنت‌ها بعد از تاریخ انتخابی', 'Count': 'تعداد مشتریان'}
                                     )
                                 elif to_segment!='All':
                                     fig = px.bar(
@@ -1497,7 +1156,7 @@ def main():
                                         color='RFM_segment_label_RFM1',
                                         color_discrete_map=COLOR_MAP,
                                         text='Count',
-                                        labels={'RFM_segment_label_RFM1': 'Segment Before that date', 'Count': 'Number of Customers'}
+                                        labels={'RFM_segment_label_RFM1': 'سگمنت‌ها قبل از تاریخ انتخابی', 'Count': 'تعداد مشتریان'}
                                     )
                                 
                                 if to_segment=='All' or from_segment=='All':
@@ -1533,15 +1192,15 @@ def main():
                                         mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                                     )
 
-            elif page == 'Portfolio Analysis':
+            elif page == 'تحلیل سبد خرید مشتری':
                 # ------------------ Portfolio Analysis ------------------
 
-                st.subheader("Portfolio Analysis by Cluster and Product")
+                st.subheader("تحلیل سبد خرید مشتری بر اساس سگمنت‌ها و محصولات")
 
                 # Get unique clusters from RFM data
                 cluster_options = rfm_data['RFM_segment_label'].unique().tolist()
                 cluster_options.sort()
-                select_all_clusters = st.checkbox("Select all clusters", value=True, key='select_all_clusters_portfolio')
+                select_all_clusters = st.checkbox("انتخاب تمام سگمنت‌ها", value=True, key='select_all_clusters_portfolio')
 
                 if select_all_clusters:
                     selected_clusters = cluster_options
@@ -1556,7 +1215,7 @@ def main():
                 # Filter by Complex
                 complex_options = data['Complex'].dropna().unique().tolist()
                 complex_options.sort()
-                select_all_complex = st.checkbox("Select all complexes", value=True, key='select_all_complex')
+                select_all_complex = st.checkbox("انتخاب تمام مجتمع‌ها", value=True, key='select_all_complex')
 
                 if select_all_complex:
                     selected_complexes = complex_options
@@ -1573,7 +1232,7 @@ def main():
                 # Filter by Type
                 type_options = data_filtered_by_complex['عنوان محصول'].dropna().unique().tolist()
                 type_options.sort()
-                select_all_types = st.checkbox("Select all types", value=True, key='select_all_types')
+                select_all_types = st.checkbox("انتخاب تمام تیپ‌ها", value=True, key='select_all_types')
 
                 if select_all_types:
                     selected_types = type_options
@@ -1589,7 +1248,7 @@ def main():
 
                 # Filter by Blacklist Status
                 blacklist_options = sorted(data['BlackList Status'].unique())
-                select_all_blacklist = st.checkbox("Select all BlackList statuses", value=True, key='select_all_blacklist')
+                select_all_blacklist = st.checkbox("هم بلک‌لیست و هم غیر بلک‌لیست", value=True, key='select_all_blacklist')
 
                 if select_all_blacklist:
                     selected_blacklist = blacklist_options
@@ -1605,13 +1264,13 @@ def main():
 
                 # VIP Filter
                 vip_options_page = sorted(rfm_data['VIP Status'].unique())
-                select_all_vips_page = st.checkbox("Select all VIP statuses", value=True, key='select_all_vips_portfolio')
+                select_all_vips_page = st.checkbox("VIP انتخاب تمام دسته‌های ", value=True, key='select_all_vips_portfolio')
 
                 if select_all_vips_page:
                     selected_vips_portfolio = vip_options_page
                 else:
                     selected_vips_portfolio = st.multiselect(
-                        "Select VIP Status:",
+                        "انتخاب کنید VIP سطح:",
                         options=vip_options_page,
                         default=[],
                         key='vips_multiselect_portfolio'
@@ -1623,9 +1282,9 @@ def main():
 
                 if apply_portfolio:
                     if not selected_clusters:
-                        st.warning("Please select at least one cluster.")
+                        st.warning("لااقل یک سگمنت را انتخاب کنید.")
                     elif not selected_vips_portfolio:
-                        st.warning("Please select at least one VIP status.")
+                        st.warning(" انتخاب کنید VIP لااقل یک سطح")
                     else:
                         # Get customers in selected clusters and VIP statuses
                         customers_in_clusters = rfm_data[(rfm_data['RFM_segment_label'].isin(selected_clusters)) &
@@ -1635,7 +1294,7 @@ def main():
                         deals_filtered = data_filtered_by_blacklist[data_filtered_by_blacklist['کد دیدار شخص معامله'].isin(customers_in_clusters)]
 
                         if deals_filtered.empty:
-                            st.warning("No deals found for the selected clusters, VIP statuses, and products.")
+                            st.warning("هیچ معامله‌ای با این شرایط پیدا نشد")
                         else:
                             # Frequency distribution
                             frequency_distribution = deals_filtered.groupby('عنوان محصول').size().reset_index(name='Frequency')
@@ -1644,12 +1303,12 @@ def main():
                             monetary_distribution = deals_filtered.groupby('عنوان محصول')['ارزش معامله'].sum().reset_index()
 
                             # Plot Frequency Distribution
-                            st.subheader("Frequency Distribution of Products")
+                            st.subheader("توزیع فراوانی معاملات روی این محصولات")
                             fig_freq = px.bar(
                                 frequency_distribution,
                                 x='عنوان محصول',
                                 y='Frequency',
-                                title='Frequency Distribution',
+                                title='توزیع فراوانی',
                                 labels={'عنوان محصول': 'Product', 'Frequency': 'Number of Purchases'},
                                 text='Frequency'
                             )
@@ -1657,12 +1316,12 @@ def main():
                             st.plotly_chart(fig_freq)
 
                             # Plot Monetary Distribution
-                            st.subheader("Monetary Distribution of Products")
+                            st.subheader("توزیع ارزش مالی معاملات روی این محصولات")
                             fig_monetary = px.bar(
                                 monetary_distribution,
                                 x='عنوان محصول',
                                 y='ارزش معامله',
-                                title='Monetary Distribution',
+                                title='توزیع مالی',
                                 labels={'عنوان محصول': 'Product', 'ارزش معامله': 'Total Monetary Value'},
                                 text='ارزش معامله'
                             )
@@ -1699,150 +1358,10 @@ def main():
                                     mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                                 )
 
-            elif page == 'Customer Batch Edit':
-
-                    st.title("Customer Batch Edit")
-
-                    st.write("""
-                    This tool allows you to upload a list of contacts, specify a word to add or remove from their last names, and perform batch updates.
-                    """)
-
-                    # File uploader for the Excel file
-                    uploaded_file = st.file_uploader("Upload Contacts File (Excel)", type=["xlsx"])
-
-                    # Input fields for the word and action
-                    preset_word = st.text_input("Enter the word to add/remove")
-                    action = st.selectbox("Choose an action", options=["Select", "Add", "Remove"])
-                    password = st.text_input("Enter password to confirm action", type="password")
-
-                    if st.button("Execute"):
-
-                        # Validate password
-                        if password != "test":
-                            st.error("Invalid password. Please try again.")
-                        elif uploaded_file is None:
-                            st.error("Please upload a valid Excel file.")
-                        elif action not in {"Add", "Remove"}:
-                            st.error("Please select a valid action (Add or Remove).")
-                        elif not preset_word.strip():
-                            st.error("The word to add/remove cannot be empty.")
-                        else:
-                            # Load phone numbers from the uploaded Excel file
-                            try:
-                                phone_numbers = pd.read_excel(uploaded_file, usecols=[0], header=None).squeeze().tolist()
-                            except Exception as e:
-                                st.error("Failed to read the uploaded Excel file. Please ensure it has phone numbers in the first column.")
-                                st.error(str(e))
-                                st.stop()
-
-                            # Initialize success and error counts
-                            success_count = 0
-                            error_count = 0
-
-                            # Process each phone number
-                            for mobile_phone in phone_numbers:
-                                # Endpoint for searching contacts
-                                search_endpoint = '/contact/personsearch'
-                                search_url = f"https://app.didar.me/api{search_endpoint}?apikey=uvio38zfgpbbsasyn0f8pl61b4ve6va3"
-
-                                # Search payload
-                                search_payload = {
-                                    "Criteria": {
-                                        "IsDeleted": 0,
-                                        "IsPinned": -1,
-                                        "IsVIP": -1,
-                                        "LeadType": -1,
-                                        "Pin": -1,
-                                        "SortOrder": 1,
-                                        "Keywords": str(mobile_phone),
-                                        "OwnerId": "00000000-0000-0000-0000-000000000000",
-                                        "SearchFromTime": "1930-01-01T00:00:00.000Z",
-                                        "SearchToTime": "9999-12-01T00:00:00.000Z",
-                                        "CustomFields": [],
-                                        "FilterId": None
-                                    },
-                                    "From": 0,
-                                    "Limit": 30
-                                }
-
-                                # Headers
-                                headers = {
-                                    'Content-Type': 'application/json'
-                                }
-
-                                # Search for the contact
-                                response = requests.post(search_url, headers=headers, json=search_payload)
-
-                                if response.status_code == 200:
-                                    response_data = response.json()
-                                    contacts = response_data.get('Response', {}).get('List', [])
-
-                                    if contacts:
-                                        # Process the first contact found
-                                        contact = contacts[0]
-                                        last_name = contact.get('LastName', '')
-
-                                        if action == 'Add':
-                                            # Add the preset word to the last name
-                                            updated_last_name = last_name + " " + preset_word
-                                        elif action == 'Remove':
-                                            # Remove the preset word from the last name
-                                            pattern = r'\s*' + re.escape(preset_word) + r'$'
-                                            updated_last_name = re.sub(pattern, '', last_name)
-
-                                        if updated_last_name != last_name:
-                                            # Update contact details
-                                            contact['LastName'] = updated_last_name
-                                            contact['DisplayName'] = (contact.get('FirstName', '') + ' ' + updated_last_name).strip()
-
-                                            # Remove unnecessary fields
-                                            fields_to_remove = [
-                                                'CanDelete', 'CanEdit', 'IsMine', 'HasAccess', '_Type', 'OwnerId_Old', 
-                                                'Segments', 'Owner', 'ContactStatus', 'KeepInTouch', 'Fields'
-                                            ]
-                                            for field in fields_to_remove:
-                                                contact.pop(field, None)
-
-                                            # Handle segments
-                                            segments = contact.get('Segments', [])
-                                            segment_ids = [segment.get('Id') for segment in segments]
-
-                                            # Prepare save payload
-                                            save_payload = {
-                                                "Contact": contact,
-                                                "SegmentIds": segment_ids
-                                            }
-
-                                            # Endpoint to save/update the contact
-                                            save_endpoint = '/contact/save'
-                                            save_url = f"https://app.didar.me/api{save_endpoint}?ApiKey=uvio38zfgpbbsasyn0f8pl61b4ve6va3"
-
-                                            # Save the updated contact
-                                            save_response = requests.post(save_url, headers=headers, json=save_payload)
-
-                                            if save_response.status_code == 200:
-                                                success_count += 1
-                                            else:
-                                                error_count += 1
-                                        else:
-                                            if action == 'Remove':
-                                                st.warning(f"The word '{preset_word}' was not found in the last name of contact {mobile_phone}.")
-                                            else:
-                                                st.warning(f"Contact {mobile_phone} already has the word '{preset_word}' in the last name.")
-                                    else:
-                                        error_count += 1
-                                        st.warning(f"No contact found for phone number {mobile_phone}.")
-                                else:
-                                    error_count += 1
-                                    st.error(f"Failed to search for contact {mobile_phone}. Status code: {response.status_code}")
-
-                            # Display summary of the operation
-                            st.success(f"Batch operation completed: {success_count} succeeded, {error_count} failed.")
-
-
+            
          
-            elif page == 'Seller Analysis':
-                st.subheader("Seller Analysis")
+            elif page == 'تحلیل فروشنده':
+                st.subheader("تحلیل عملکرد کارشناسان فروش")
 
                 # We use tabs for the four sections
                 tabs = st.tabs(["Single Seller Analysis", "Compare Two Sellers", "Compare All Sellers", "RFM Sales Analysis"])
@@ -3085,8 +2604,8 @@ def main():
             #          Sale Channel Analysis         #
             ##########################################
 
-            elif page == 'Sale Channel Analysis':
-                st.subheader("Sale Channel Analysis")
+            elif page == 'تحلیل کانال‌های فروش':
+                st.subheader("‌تحلیل عملکرد کانال‌های فروش")
 
                 # We use tabs for the four sections
                 tabs = st.tabs([
@@ -4647,8 +4166,8 @@ def main():
                                         st.info(f"No transitions found when calculating Net Flow for {chosen_channel}.")
 
 
-            elif page == "Arrival Analysis":
-                st.subheader("Arrival Analysis")
+            elif page == "تحلیل چک‌این":
+                st.subheader("تحلیل وضععیت چک‌این مجتمع‌ها")
 
                 # 1) --- DATE RANGE FILTER (like the rest of the dashboard) ---
 
@@ -4885,223 +4404,10 @@ def main():
                 st.success("Arrival analysis completed.")
 
 
-
-            elif page == 'VIP Analysis':
-                st.subheader("VIP Analysis")
-
-                # VIP Filter
-                vip_options_page = sorted(rfm_data['VIP Status'].unique())
-                default_vips = [vip for vip in vip_options_page if vip != 'Non-VIP']
-
-                select_all_vips_page = st.checkbox("Select all VIP statuses", value=False)
-                if select_all_vips_page:
-                    selected_vips_vip_analysis = vip_options_page
-                else:
-                    selected_vips_vip_analysis = st.multiselect(
-                        "Select VIP Status:",
-                        options=vip_options_page,
-                        default=default_vips
-                    )
-
-                # Date Range Input
-                min_date = data['تاریخ انجام معامله'].min().date()
-                max_date = data['تاریخ انجام معامله'].max().date()
-
-                start_date = st.date_input("Start Date", value=min_date, min_value=min_date, max_value=max_date)
-                end_date = st.date_input("End Date", value=max_date, min_value=min_date, max_value=max_date)
-
-                if not selected_vips_vip_analysis:
-                    st.warning("Please select at least one VIP status.")
-                else:
-                    # Filter data
-                    date_filtered_data = filtered_data[
-                        (filtered_data['تاریخ انجام معامله'].dt.date >= start_date) &
-                        (filtered_data['تاریخ انجام معامله'].dt.date <= end_date) &
-                        (filtered_data['وضعیت معامله'] == 'موفق') &
-                        (filtered_data['VIP Status'].isin(selected_vips_vip_analysis))
-                    ]
-
-                    if date_filtered_data.empty:
-                        st.warning("No successful deals found for the selected VIP statuses in the specified date range.")
-                    else:
-                        # Get VIP RFM data
-                        vip_customer_ids = date_filtered_data['کد دیدار شخص معامله'].unique()
-                        vip_rfm_data = rfm_data[rfm_data['Customer ID'].isin(vip_customer_ids)]
-
-                        if vip_rfm_data.empty:
-                            st.warning("No RFM data available for the selected VIP statuses.")
-                        else:
-                            # Insights
-                            filtered_vip_data = vip_rfm_data[vip_rfm_data['VIP Status'] != 'Non-VIP']
-                            total_vip_customers = filtered_vip_data['Customer ID'].nunique()
-                            total_vip_champions = filtered_vip_data[filtered_vip_data['RFM_segment_label'] == 'Champions']['Customer ID'].nunique()
-                            total_vip_non_champions = total_vip_customers - total_vip_champions
-
-
-                            st.write(f"**Total VIP Customers:** {total_vip_customers}")
-                            st.write(f"**Total VIP Champions:** {total_vip_champions}")
-                            st.write(f"**Total VIP Non-Champions:** {total_vip_non_champions}")
-
-                            # Number of Champions who are not VIP
-                            total_champions_all = rfm_data_filtered_global[rfm_data_filtered_global['RFM_segment_label'] == 'Champions']['Customer ID'].nunique()
-                            champions_not_vip = total_champions_all - total_vip_champions
-                            st.write(f"**Number of Champions who are not VIP:** {champions_not_vip}")
-
-                            # Plot distribution of VIPs across segments
-                            vip_segment_distribution = vip_rfm_data['RFM_segment_label'].value_counts().reset_index()
-                            vip_segment_distribution.columns = ['RFM_segment_label', 'Count']
-
-                            fig_vip_segments = px.pie(
-                                vip_segment_distribution,
-                                names='RFM_segment_label',
-                                values='Count',
-                                color='RFM_segment_label',
-                                color_discrete_map=COLOR_MAP,
-                                hole=0.4,
-                                title='VIP Customers Distribution across RFM Segments'
-                            )
-
-                            fig_vip_segments.update_traces(textposition='inside', textinfo='percent+label')
-
-                            st.plotly_chart(fig_vip_segments)
-
-                            # Additional Insights
-                            st.subheader("Additional Insights")
-
-                            # Average Monetary Value per VIP Level
-                            avg_monetary_vip = vip_rfm_data.groupby('VIP Status')['Monetary'].mean().reset_index()
-                            fig_avg_monetary = px.bar(
-                                avg_monetary_vip,
-                                x='VIP Status',
-                                y='Monetary',
-                                title='Average Monetary Value per VIP Level',
-                                labels={'Monetary': 'Average Monetary Value'},
-                                text='Monetary'
-                            )
-                            fig_avg_monetary.update_traces(textposition='outside')
-                            st.plotly_chart(fig_avg_monetary)
-
-                            # Recency Distribution
-                            fig_recency_vip = px.histogram(
-                                vip_rfm_data,
-                                x='Recency',
-                                nbins=50,
-                                title='Recency Distribution for VIP Customers',
-                                color='VIP Status',
-                                barmode='overlay'
-                            )
-                            st.plotly_chart(fig_recency_vip)
-
-                            # Frequency Distribution
-                            fig_frequency_vip = px.histogram(
-                                vip_rfm_data,
-                                x='Frequency',
-                                nbins=20,
-                                title='Frequency Distribution for VIP Customers',
-                                color='VIP Status',
-                                barmode='overlay'
-                            )
-                            st.plotly_chart(fig_frequency_vip)
-
-                            # ------------------ Customer Table with Editable VIP Status ------------------
-
-                            st.subheader("Edit VIPs")
-
-                            # Prepare customer details
-                            vip_customer_details = vip_rfm_data[['Customer ID', 'First Name', 'Last Name', 'VIP Status', 'Phone Number', 'Recency', 'Frequency', 'Monetary', 'RFM_segment_label']].copy()
-                            vip_customer_details['First Name'] = vip_customer_details['First Name'].fillna('')
-                            vip_customer_details['Phone Number'] = vip_customer_details['Phone Number'].fillna('')
-                            vip_customer_details['Last Name'] = vip_customer_details['Last Name'].fillna('')
-
-                            # Add 'New VIP Status' column
-                            vip_customer_details['New VIP Status'] = vip_customer_details['VIP Status']
-
-                            # Configure AgGrid
-                            vip_status_options = ['Gold VIP', 'Silver VIP', 'Bronze VIP', 'Non-VIP']
-                            gb = GridOptionsBuilder.from_dataframe(vip_customer_details)
-                            gb.configure_pagination()
-                            gb.configure_default_column(editable=False)
-                            gb.configure_column('New VIP Status', editable=True, cellEditor='agSelectCellEditor', cellEditorParams={'values': vip_status_options})
-                            grid_options = gb.build()
-
-                            grid_response = AgGrid(
-                                vip_customer_details,
-                                gridOptions=grid_options,
-                                data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-                                update_mode=GridUpdateMode.VALUE_CHANGED,
-                                fit_columns_on_grid_load=True
-                            )
-
-                            edited_df = grid_response['data']
-
-                            # Password Input
-                            password = st.text_input('Enter password to apply changes:', type='password')
-
-                            # Apply Changes Button
-                            if st.button('APPLY CHANGES'):
-                                if password != "test":
-                                    st.error('Incorrect password.')
-                                else:
-                                    changed_vip_customers = edited_df[edited_df['VIP Status'] != edited_df['New VIP Status']]
-                                    if changed_vip_customers.empty:
-                                        st.info('No changes detected.')
-                                    else:
-                                        # Apply changes
-                                        for idx, row in changed_vip_customers.iterrows():
-                                            customer_id = row['Customer ID']
-                                            phone_number = row['Phone Number']
-                                            old_vip_status = row['VIP Status']
-                                            new_vip_status = row['New VIP Status']
-                                            last_name = row['Last Name']
-
-                                            updated_last_name = update_last_name(last_name, new_vip_status)
-
-                                            # Update local dataframes
-                                            edited_df.at[idx, 'Last Name'] = updated_last_name
-                                            edited_df.at[idx, 'VIP Status'] = new_vip_status
-                                            edited_df.at[idx, 'Last Name'] = updated_last_name
-                                            vip_rfm_data.loc[vip_rfm_data['Customer ID'] == customer_id, 'Last Name'] = updated_last_name
-                                            vip_rfm_data.loc[vip_rfm_data['Customer ID'] == customer_id, 'VIP Status'] = new_vip_status
-                                            rfm_data.loc[rfm_data['Customer ID'] == customer_id, 'Last Name'] = updated_last_name
-                                            rfm_data.loc[rfm_data['Customer ID'] == customer_id, 'VIP Status'] = new_vip_status
-                                         
-                                            # Update via API
-                                            success = update_contact_last_name(phone_number, updated_last_name)
-                                            customer_name = f"{row['First Name']} {updated_last_name}".strip()
-                                            if success:
-                                                st.success(f"Customer {customer_name} updated successfully.")
-                                            else:
-                                                st.error(f"Failed to update customer {customer_name}.")
-
-                                        
-                             # Display updated customer table
-                            st.subheader("VIP Customer Details")
-                            st.write(edited_df.drop(columns=['New VIP Status']))
-
-                            # Optionally, allow users to download the updated data
-                            csv_data = convert_df(edited_df.drop(columns=['New VIP Status']))
-                            excel_data = convert_df_to_excel(edited_df.drop(columns=['New VIP Status']))
-
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.download_button(
-                                label="Download updated data as CSV",
-                                data=csv_data,
-                                file_name='updated_vip_analysis.csv',
-                                mime='text/csv',
-                                )
-                            with col2:
-                                st.download_button(
-                                label="Download updated data as Excel",
-                                data=excel_data,
-                                file_name='updated_vip_analysis.xlsx',
-                                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                                )
-
-            elif page == 'Customer Inquiry Module':
+            elif page == 'استعلام اطلاعات مشتری':
                 # ------------------ Customer Inquiry Module ------------------
 
-                st.subheader("Customer Inquiry Module")
+                st.subheader("ماژول استعلام و تحلیل مشتری")
 
                 with st.form(key='customer_inquiry_form'):
                     st.write("Enter at least one of the following fields to search for a customer:")
